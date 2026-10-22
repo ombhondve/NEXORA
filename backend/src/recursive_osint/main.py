@@ -67,5 +67,8 @@ async def health():
         "status": "healthy",
         "app": settings.APP_NAME,
         "version": "1.0.0",
+        "environment": settings.ENVIRONMENT,
+        "database_source": settings.DATABASE_SOURCE,
+        "database_target": settings.get_redacted_database_url(),
     }
 

@@ -17,7 +17,10 @@ import recursive_osint.db.models
 
 
 async def run_migrations():
-    print(f"[*] Running database migrations against: {settings.get_redacted_database_url()}")
+    migration_url = settings.get_migration_url(is_async=True)
+    redacted = settings.get_redacted_url(migration_url)
+    print(f"[*] Running database migrations against: {redacted}")
+    print(f"[*] Connection Source: {settings.DATABASE_MIGRATION_SOURCE}")
 
     # Verify connection
     async with engine.begin() as conn:

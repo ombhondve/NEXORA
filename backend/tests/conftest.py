@@ -15,10 +15,12 @@ from recursive_osint.db.models.user import User
 from recursive_osint.core.security import hash_password, create_access_token
 from recursive_osint.main import app
 
+from sqlalchemy.pool import StaticPool
+
 # Shared named in-memory SQLite async engine for hermetic test execution
 TEST_DATABASE_URL = "sqlite+aiosqlite:///file:test_db?mode=memory&cache=shared&uri=true"
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=StaticPool)
 TestingSessionLocal = async_sessionmaker(
     bind=test_engine, class_=AsyncSession, expire_on_commit=False
 )

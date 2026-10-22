@@ -18,7 +18,14 @@ def check_env():
     print("==================================================")
     print(f"App Name:        {settings.APP_NAME}")
     print(f"Environment:     {settings.ENVIRONMENT}")
-    print(f"Database URL:    {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else settings.DATABASE_URL}")
+    print(f"Database Source: {settings.DATABASE_SOURCE}")
+    print(f"Database URL:    {settings.get_redacted_database_url()}")
+    if settings.DATABASE_NEXORA_POSTGRES_URL_NON_POOLING:
+        print(f"Non-Pooling URL: {settings.get_redacted_url(settings.DATABASE_NEXORA_POSTGRES_URL_NON_POOLING)}")
+    if settings.DATABASE_NEXORA_PGHOST:
+        print(f"Neon PG Host:    {settings.DATABASE_NEXORA_PGHOST}")
+    if settings.DATABASE_NEXORA_NEON_PROJECT_ID:
+        print(f"Neon Project ID: {settings.DATABASE_NEXORA_NEON_PROJECT_ID}")
     print(f"Redis URL:       {settings.REDIS_URL}")
     print(f"SSRF Protection: {'ENABLED (Strict)' if settings.ENABLE_SSRF_PROTECTION else 'DISABLED'}")
     print(f"Storage Root:    {settings.STORAGE_LOCAL_ROOT}")
