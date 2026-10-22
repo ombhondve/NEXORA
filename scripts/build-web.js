@@ -30,20 +30,37 @@ if (!webDir) {
   webDir = path.resolve(__dirname, '../apps/web');
 }
 
-console.log(`[build-web] Building Next.js application in: ${webDir}`);
-execSync('npm run build', { cwd: webDir, stdio: 'inherit' });
+const isSyncOnly = process.argv.includes('--sync-only');
 
-// Ensure .next output exists at current working directory for Vercel
+if (!isSyncOnly) {
+  console.log(`[build-web] Building Next.js application in: ${webDir}`);
+  execSync('npm run build', { cwd: webDir, stdio: 'inherit' });
+}
+
+// Ensure .next output exists at all possible runtime locations:
+// 1. Current working directory (.next)
+// 2. apps/.next (required when Vercel project Root Directory is 'apps')
+// 3. apps/web/.next (Next.js default build output)
+// 4. Monorepo root (.next)
 const srcNext = path.join(webDir, '.next');
-const destNext = path.join(process.cwd(), '.next');
+const targetDirs = [
+  path.join(process.cwd(), '.next'),
+  path.resolve(webDir, '../.next'),
+  path.resolve(__dirname, '../.next'),
+];
 
-if (srcNext !== destNext && fs.existsSync(srcNext)) {
-  console.log(`[build-web] Syncing build artifacts to: ${destNext}`);
-  fs.cpSync(srcNext, destNext, { recursive: true });
+const uniqueTargets = Array.from(new Set(targetDirs.map((d) => path.normalize(d))))
+  .filter((d) => d !== path.normalize(srcNext));
 
-  // Repair Node File Trace (.nft.json) relative traversal paths
-  console.log('[build-web] Adjusting NFT trace paths for deployment packaging...');
-  adjustNftTraces(srcNext, destNext);
+if (fs.existsSync(srcNext)) {
+  for (const targetNext of uniqueTargets) {
+    console.log(`[build-web] Syncing build artifacts to: ${targetNext}`);
+    fs.cpSync(srcNext, targetNext, { recursive: true });
+
+    // Repair Node File Trace (.nft.json) relative traversal paths
+    console.log(`[build-web] Adjusting NFT trace paths for: ${targetNext}...`);
+    adjustNftTraces(srcNext, targetNext);
+  }
 }
 
 console.log('[build-web] Build completed successfully.');

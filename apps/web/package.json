@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node ../../scripts/build-web.js --sync-only",
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
