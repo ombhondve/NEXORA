@@ -111,9 +111,13 @@ class InvestigationService:
         )
         seen_node_ids.add(root_id)
 
-        # 2. Add Discovery Leads
+        # 2. Add Discovery Leads (Filtered)
         for lead in leads:
             if lead.id not in seen_node_ids:
+                # Disqualify dates and noise domains from lead nodes if any slipped through
+                if lead.lead_type == "date" or is_noise_domain(lead.lead_value):
+                    continue
+
                 nodes.append(
                     GraphNode(
                         id=lead.id,
@@ -130,32 +134,53 @@ class InvestigationService:
                 )
                 seen_node_ids.add(lead.id)
 
-            # Determine parent connection safely
-            parent_id = (
-                lead.parent_lead_id
-                if (lead.parent_lead_id and lead.parent_lead_id in seen_node_ids)
-                else root_id
-            )
-            edge_key = (parent_id, lead.id, "expanded_to")
-            if edge_key not in seen_edge_keys:
-                edges.append(
-                    GraphEdge(
-                        id=f"edge:{parent_id}->{lead.id}",
-                        source=parent_id,
-                        target=lead.id,
-                        label="expanded_to",
-                        confidence=lead.priority_score,
-                    )
+                # Determine parent connection safely
+                parent_id = (
+                    lead.parent_lead_id
+                    if (lead.parent_lead_id and lead.parent_lead_id in seen_node_ids)
+                    else root_id
                 )
-                seen_edge_keys.add(edge_key)
+                edge_key = (parent_id, lead.id, "expanded_to")
+                if edge_key not in seen_edge_keys:
+                    edges.append(
+                        GraphEdge(
+                            id=f"edge:{parent_id}->{lead.id}",
+                            source=parent_id,
+                            target=lead.id,
+                            label="expanded_to",
+                            confidence=lead.priority_score,
+                        )
+                    )
+                    seen_edge_keys.add(edge_key)
 
-        # 3. Add Extracted Entities and Relationships
+        # 3. Add Collapsed & Deduplicated Extracted Entities
+        # Key: (entity_type, normalized_value) -> canonical node ID
+        canonical_map: dict[tuple[str, str], str] = {}
+        entity_id_to_canonical: dict[str, str] = {}
+        entity_counts: dict[str, int] = {}
+
         for ent in entities:
-            ent_id = f"ent:{ent.id}"
-            if ent_id not in seen_node_ids:
+            # Filter noise dates and generic domains out of default knowledge graph
+            if ent.entity_type == "date":
+                continue
+            if ent.entity_type == "domain" and is_noise_domain(ent.normalized_value):
+                continue
+
+            entity_key = (ent.entity_type, ent.normalized_value)
+            canonical_id = f"ent:{ent.entity_type}:{ent.normalized_value}"
+            entity_id_to_canonical[ent.id] = canonical_id
+
+            if entity_key in canonical_map:
+                entity_counts[canonical_id] = entity_counts.get(canonical_id, 1) + 1
+                continue
+
+            canonical_map[entity_key] = canonical_id
+            entity_counts[canonical_id] = 1
+
+            if canonical_id not in seen_node_ids:
                 nodes.append(
                     GraphNode(
-                        id=ent_id,
+                        id=canonical_id,
                         label=ent.entity_value,
                         type=ent.entity_type,
                         depth=1,
@@ -167,38 +192,52 @@ class InvestigationService:
                         },
                     )
                 )
-                seen_node_ids.add(ent_id)
+                seen_node_ids.add(canonical_id)
 
-                # Connect to root
-                edge_key = (root_id, ent_id, "mentions")
+                # Traceable relational edge to root
+                rel_label = {
+                    "domain": "associated_domain",
+                    "organization": "affiliated_org",
+                    "email": "contact_email",
+                    "identifier": "identifier_of",
+                }.get(ent.entity_type, "mentions")
+
+                edge_key = (root_id, canonical_id, rel_label)
                 if edge_key not in seen_edge_keys:
                     edges.append(
                         GraphEdge(
-                            id=f"edge:{root_id}->{ent_id}",
+                            id=f"edge:{root_id}->{canonical_id}",
                             source=root_id,
-                            target=ent_id,
-                            label="mentions",
+                            target=canonical_id,
+                            label=rel_label,
                             confidence=ent.confidence,
                         )
                     )
                     seen_edge_keys.add(edge_key)
 
+        # Update metadata for occurrences on deduplicated nodes
+        for node in nodes:
+            if node.id in entity_counts:
+                node.metadata["corroboration_count"] = entity_counts[node.id]
+
+        # 4. Map Entity Relationships using Canonical IDs
         for rel in relationships:
-            src_id = f"ent:{rel.source_entity_id}"
-            tgt_id = f"ent:{rel.target_entity_id}"
-            if src_id in seen_node_ids and tgt_id in seen_node_ids:
-                edge_key = (src_id, tgt_id, rel.relationship_type)
-                if edge_key not in seen_edge_keys:
-                    edges.append(
-                        GraphEdge(
-                            id=f"edge:{src_id}->{tgt_id}",
-                            source=src_id,
-                            target=tgt_id,
-                            label=rel.relationship_type,
-                            confidence=rel.confidence,
+            src_canonical = entity_id_to_canonical.get(rel.source_entity_id)
+            tgt_canonical = entity_id_to_canonical.get(rel.target_entity_id)
+            if src_canonical and tgt_canonical and src_canonical in seen_node_ids and tgt_canonical in seen_node_ids:
+                if src_canonical != tgt_canonical:
+                    edge_key = (src_canonical, tgt_canonical, rel.relationship_type)
+                    if edge_key not in seen_edge_keys:
+                        edges.append(
+                            GraphEdge(
+                                id=f"edge:{src_canonical}->{tgt_canonical}",
+                                source=src_canonical,
+                                target=tgt_canonical,
+                                label=rel.relationship_type,
+                                confidence=rel.confidence,
+                            )
                         )
-                    )
-                    seen_edge_keys.add(edge_key)
+                        seen_edge_keys.add(edge_key)
 
         is_empty = len(nodes) <= 1 and len(edges) == 0
 

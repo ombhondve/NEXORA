@@ -20,7 +20,7 @@ from recursive_osint.discovery.budget import InvestigationBudget
 from recursive_osint.discovery.lead_queue import LeadPriorityQueue
 from recursive_osint.discovery.stopping_rules import StoppingRules
 from recursive_osint.evidence.relevance import EvidenceEvaluator
-from recursive_osint.extraction.entities import EntityExtractor
+from recursive_osint.extraction.entities import EntityExtractor, is_noise_domain
 from recursive_osint.search.deduplication import canonicalize_url, compute_content_hash
 from recursive_osint.search.query_expansion import QueryExpansionEngine
 
@@ -184,29 +184,31 @@ class RecursiveDiscoveryEngine:
                             await self.session.flush()
 
                             # Evaluate Evidence Relevance & Uncertainty
+                            is_simulated = getattr(connector, "is_simulated", False) or item.source_name == "mock_demo"
                             full_passage = f"{item.title}. {item.snippet}"
                             relevance, uncertainty, conf, why = EvidenceEvaluator.evaluate_passage(
                                 passage=full_passage,
                                 clue=self.investigation.target_clue,
                                 source_name=connector.display_name,
+                                title=item.title,
+                                is_simulated=is_simulated,
                             )
 
-                            is_simulated = getattr(connector, "is_simulated", False)
                             evidence = EvidenceRecord(
                                 investigation_id=self.investigation.id,
                                 document_id=doc.id,
                                 title=item.title,
                                 extracted_passage=item.snippet,
                                 relevance_score=relevance,
-                                uncertainty_score=0.85 if is_simulated else uncertainty,
-                                confidence_level="unverified" if is_simulated else conf,
-                                why_included=f"[Simulated Source] {why}" if is_simulated else why,
+                                uncertainty_score=uncertainty,
+                                confidence_level=conf,
+                                why_included=why,
                                 is_verified_source_statement=not is_simulated,
                             )
                             self.session.add(evidence)
 
-                            # Extract Entities
-                            entities = EntityExtractor.extract_all(full_passage)
+                            # Extract Entities with noise filtering
+                            entities = EntityExtractor.extract_all(full_passage, target_clue=self.investigation.target_clue)
                             saved_entities: List[ExtractedEntity] = []
                             for e in entities:
                                 extracted_ent = ExtractedEntity(
@@ -221,9 +223,17 @@ class RecursiveDiscoveryEngine:
                                 self.session.add(extracted_ent)
                                 saved_entities.append(extracted_ent)
 
-                                # Push high-confidence entities as new recursive leads if within depth limit
+                                # Push high-value entities as new recursive leads strictly if eligible
                                 next_depth = current_depth + 1
-                                if next_depth <= self.budget.max_depth and e.confidence >= 0.75:
+                                if (
+                                    next_depth <= self.budget.max_depth
+                                    and e.is_lead_candidate
+                                    and e.entity_type != "date"
+                                    and not is_noise_domain(e.normalized_value)
+                                    and not is_simulated
+                                    and e.confidence >= 0.70
+                                    and evidence.confidence_level in ("high", "medium")
+                                ):
                                     child_lead = DiscoveryLead(
                                         investigation_id=self.investigation.id,
                                         parent_lead_id=lead.lead_id,
@@ -232,7 +242,7 @@ class RecursiveDiscoveryEngine:
                                         depth=next_depth,
                                         priority_score=e.confidence * (1.0 - (next_depth * 0.15)),
                                         status="queued",
-                                        discovery_reason=f"Extracted from {doc.title} ({connector.name})",
+                                        discovery_reason=f"Contextually correlated [{e.entity_type}] from {doc.title} ({connector.name})",
                                     )
                                     self.session.add(child_lead)
                                     await self.session.flush()
@@ -248,7 +258,7 @@ class RecursiveDiscoveryEngine:
                                     if pushed:
                                         await self.emit_event(
                                             "lead_discovered",
-                                            f"Discovered new recursive lead [{e.entity_type}]: '{e.entity_value}' at depth {next_depth}",
+                                            f"Discovered new qualified lead [{e.entity_type}]: '{e.entity_value}' at depth {next_depth}",
                                             {"lead_value": e.entity_value, "depth": next_depth},
                                         )
 
@@ -274,11 +284,14 @@ class RecursiveDiscoveryEngine:
 
             # Update progress percent based on queries executed vs budget limit
             progress = int((self.budget.queries_executed / self.budget.max_total_queries) * 100)
-            self.investigation.progress_percent = min(100, max(self.investigation.progress_percent, progress))
+            self.investigation.progress_percent = min(95, max(self.investigation.progress_percent, progress))
             await self.session.commit()
 
         # Finalize investigation with truthful status and stop reason
         total_queries = successful_queries + failed_queries
+        budget_exhausted = self.budget.queries_executed >= self.budget.max_total_queries
+        unexplored_leads_remain = not self.queue.is_empty() or self.investigation.current_depth < self.investigation.max_depth
+
         if self.is_cancelled:
             self.investigation.status = "cancelled"
             self.investigation.stop_reason = "Cancelled by user request."
@@ -287,17 +300,26 @@ class RecursiveDiscoveryEngine:
             self.investigation.status = "failed"
             self.investigation.stop_reason = stop_reason or f"All {failed_queries} queries failed across active search connectors."
             await self.emit_event("investigation_failed", f"Investigation failed. Stop reason: {self.investigation.stop_reason}")
+        elif budget_exhausted and unexplored_leads_remain:
+            # Honest partial completion when query limit halts recursive exploration
+            self.investigation.status = "partial"
+            self.investigation.stop_reason = (
+                f"Query budget exhausted ({self.budget.queries_executed}/{self.budget.max_total_queries}) "
+                f"at depth {self.investigation.current_depth}/{self.investigation.max_depth}. Unexplored leads remain."
+            )
+            self.investigation.progress_percent = min(95, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
+            await self.emit_event("investigation_partial", f"Investigation paused by query budget limit: {self.investigation.stop_reason}")
         elif failed_queries > 0 and successful_queries > 0:
             self.investigation.status = "partial"
             self.investigation.stop_reason = stop_reason or f"Completed with partial source coverage ({len(providers_succeeded)} connectors active, {len(providers_failed)} failed)."
-            self.investigation.progress_percent = min(100, max(self.investigation.progress_percent, int((self.budget.queries_executed / self.budget.max_total_queries) * 100)))
+            self.investigation.progress_percent = min(95, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
             await self.emit_event("investigation_partial", f"Investigation finalized with partial coverage. Stop reason: {self.investigation.stop_reason}")
         else:
             self.investigation.status = "completed"
             if total_results_found == 0:
                 self.investigation.stop_reason = stop_reason or "Lead discovery completed; zero findings discovered across active sources."
             else:
-                self.investigation.stop_reason = stop_reason or "Lead discovery completed within allotted budget."
+                self.investigation.stop_reason = "Completed: recursive discovery exhausted all planned branches."
             self.investigation.progress_percent = 100
             await self.emit_event("investigation_completed", f"Investigation finalized. Stop reason: {self.investigation.stop_reason}")
 
