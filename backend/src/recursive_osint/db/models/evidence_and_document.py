@@ -48,6 +48,42 @@ class EvidenceRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     investigation = relationship("Investigation", back_populates="evidence")
     document = relationship("SourceDocument", back_populates="evidence")
 
+    @property
+    def source_url(self) -> Optional[str]:
+        return self.document.url if self.document else None
+
+    @property
+    def source_title(self) -> Optional[str]:
+        return self.document.title if self.document else self.title
+
+    @property
+    def connector_name(self) -> Optional[str]:
+        return self.document.connector_name if self.document else None
+
+    @property
+    def retrieved_at(self) -> Optional[datetime]:
+        return self.document.retrieved_at if self.document else self.created_at
+
+    @property
+    def publication_date(self) -> Optional[str]:
+        return self.document.publication_date if self.document else None
+
+    @property
+    def is_simulated(self) -> bool:
+        if self.document and self.document.connector_name in ("mock_demo", "mock"):
+            return True
+        return not self.is_verified_source_statement or "simulated" in (self.why_included or "").lower()
+
+    @property
+    def source_verification_status(self) -> str:
+        if self.is_simulated:
+            return "simulated"
+        if not self.is_verified_source_statement:
+            return "unverified"
+        if self.document and self.document.connector_name in ("openalex", "crossref", "wikidata", "wikipedia"):
+            return "primary"
+        return "secondary"
+
 
 class DocumentRelationship(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "document_relationships"

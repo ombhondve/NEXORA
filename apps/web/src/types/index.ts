@@ -41,6 +41,14 @@ export interface EvidenceRecord {
   is_verified_source_statement: boolean;
   contradictions_noted?: string;
   created_at: string;
+  // Provenance & Quality properties
+  source_url?: string;
+  source_title?: string;
+  connector_name?: string;
+  retrieved_at?: string;
+  publication_date?: string;
+  source_verification_status?: 'primary' | 'secondary' | 'simulated' | 'unverified';
+  is_simulated?: boolean;
 }
 
 export interface SourceDocument {
@@ -119,6 +127,11 @@ export interface GraphEdge {
   target: string;
   label: string;
   confidence?: number;
+  relationship_kind?: 'direct' | 'inferred' | 'unverified';
+  evidence_id?: string;
+  evidence_title?: string;
+  source_url?: string;
+  confidence_rationale?: string;
 }
 
 export interface LeadGraphResponse {

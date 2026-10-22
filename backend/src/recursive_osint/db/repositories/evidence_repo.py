@@ -4,6 +4,7 @@ Evidence, Document, and Entity repository.
 
 from typing import List, Optional
 from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from recursive_osint.db.models.evidence_and_document import EvidenceRecord, SourceDocument
 from recursive_osint.db.models.entity import ExtractedEntity, EntityRelationship
@@ -19,6 +20,7 @@ class EvidenceRepository(BaseRepository[EvidenceRecord]):
     ) -> List[EvidenceRecord]:
         stmt = (
             select(EvidenceRecord)
+            .options(selectinload(EvidenceRecord.document))
             .where(EvidenceRecord.investigation_id == investigation_id)
             .order_by(desc(EvidenceRecord.relevance_score))
             .offset(skip)

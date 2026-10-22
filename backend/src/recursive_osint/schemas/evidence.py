@@ -21,7 +21,15 @@ class EvidenceRecordResponse(BaseModel):
     why_included: str
     is_verified_source_statement: bool
     contradictions_noted: Optional[str] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
+    # Complete provenance fields
+    source_url: Optional[str] = None
+    source_title: Optional[str] = None
+    connector_name: Optional[str] = None
+    retrieved_at: Optional[datetime] = None
+    publication_date: Optional[str] = None
+    source_verification_status: str = "secondary"
+    is_simulated: bool = False
 
 
 class SourceDocumentResponse(BaseModel):

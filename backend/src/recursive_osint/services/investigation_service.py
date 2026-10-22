@@ -91,6 +91,10 @@ class InvestigationService:
         evidence_repo = EvidenceRepository(self.session)
         entities = await evidence_repo.list_entities(investigation_id)
         relationships = await evidence_repo.list_entity_relationships(investigation_id)
+        documents = await evidence_repo.list_documents(investigation_id, limit=300)
+        doc_map = {d.id: d for d in documents}
+        evidence_items = await evidence_repo.list_by_investigation(investigation_id, limit=300)
+        ev_by_doc = {e.document_id: e for e in evidence_items if e.document_id}
 
         nodes: List[GraphNode] = []
         edges: List[GraphEdge] = []
@@ -106,7 +110,7 @@ class InvestigationService:
                 type="seed",
                 depth=0,
                 status="root",
-                metadata={"title": inv.title, "clue_type": inv.clue_type},
+                metadata={"title": inv.title, "clue_type": inv.clue_type, "relationship_kind": "root"},
             )
         )
         seen_node_ids.add(root_id)
@@ -118,6 +122,7 @@ class InvestigationService:
                 if lead.lead_type == "date" or is_noise_domain(lead.lead_value):
                     continue
 
+                rel_kind = "direct" if lead.depth <= 1 else "inferred"
                 nodes.append(
                     GraphNode(
                         id=lead.id,
@@ -129,6 +134,7 @@ class InvestigationService:
                         metadata={
                             "discovery_reason": lead.discovery_reason,
                             "priority_score": lead.priority_score,
+                            "relationship_kind": rel_kind,
                         },
                     )
                 )
@@ -149,15 +155,18 @@ class InvestigationService:
                             target=lead.id,
                             label="expanded_to",
                             confidence=lead.priority_score,
+                            relationship_kind=rel_kind,
+                            confidence_rationale=lead.discovery_reason or f"Autonomous lead expansion at depth {lead.depth}",
                         )
                     )
                     seen_edge_keys.add(edge_key)
 
-        # 3. Add Collapsed & Deduplicated Extracted Entities
+        # 3. Add Collapsed & Deduplicated Extracted Entities with Document Provenance
         # Key: (entity_type, normalized_value) -> canonical node ID
         canonical_map: dict[tuple[str, str], str] = {}
         entity_id_to_canonical: dict[str, str] = {}
         entity_counts: dict[str, int] = {}
+        canonical_doc_ids: dict[str, str] = {}
 
         for ent in entities:
             # Filter noise dates and generic domains out of default knowledge graph
@@ -176,8 +185,15 @@ class InvestigationService:
 
             canonical_map[entity_key] = canonical_id
             entity_counts[canonical_id] = 1
+            if ent.document_id:
+                canonical_doc_ids[canonical_id] = ent.document_id
 
             if canonical_id not in seen_node_ids:
+                doc = doc_map.get(ent.document_id) if ent.document_id else None
+                ev = ev_by_doc.get(ent.document_id) if ent.document_id else None
+                is_simulated = bool(doc and doc.connector_name in ("mock_demo", "mock"))
+                rel_kind = "unverified" if is_simulated else ("direct" if ent.confidence >= 0.8 else "inferred")
+
                 nodes.append(
                     GraphNode(
                         id=canonical_id,
@@ -189,6 +205,12 @@ class InvestigationService:
                         metadata={
                             "normalized_value": ent.normalized_value,
                             "context": ent.context_snippet,
+                            "source_url": doc.url if doc else None,
+                            "source_title": doc.title if doc else None,
+                            "connector_name": doc.connector_name if doc else None,
+                            "relationship_kind": rel_kind,
+                            "is_simulated": is_simulated,
+                            "evidence_excerpt": ev.extracted_passage if ev else ent.context_snippet,
                         },
                     )
                 )
@@ -211,6 +233,14 @@ class InvestigationService:
                             target=canonical_id,
                             label=rel_label,
                             confidence=ent.confidence,
+                            relationship_kind=rel_kind,
+                            evidence_id=ev.id if ev else None,
+                            evidence_title=doc.title if doc else None,
+                            source_url=doc.url if doc else None,
+                            confidence_rationale=(
+                                f"Extracted from {doc.title} ({doc.connector_name})"
+                                if doc else f"Entity cross-reference with target"
+                            ),
                         )
                     )
                     seen_edge_keys.add(edge_key)
@@ -235,6 +265,8 @@ class InvestigationService:
                                 target=tgt_canonical,
                                 label=rel.relationship_type,
                                 confidence=rel.confidence,
+                                relationship_kind="inferred",
+                                confidence_rationale=rel.provenance_notes or "Correlated relationship across documents",
                             )
                         )
                         seen_edge_keys.add(edge_key)

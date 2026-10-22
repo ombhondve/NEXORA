@@ -84,6 +84,11 @@ class GraphEdge(BaseModel):
     target: str
     label: str = "discovered"
     confidence: Optional[float] = None
+    relationship_kind: str = "direct"  # direct, inferred, unverified
+    evidence_id: Optional[str] = None
+    evidence_title: Optional[str] = None
+    source_url: Optional[str] = None
+    confidence_rationale: Optional[str] = None
 
 
 class LeadGraphResponse(BaseModel):

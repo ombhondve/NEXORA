@@ -418,8 +418,10 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
                   <div className="text-cyber-cyan font-bold">{selectedNode.depth}</div>
                 </div>
                 <div>
-                  <span className="text-slate-400">Discovery Status:</span>
-                  <div className="text-emerald-400 capitalize">{selectedNode.status}</div>
+                  <span className="text-slate-400">Relationship:</span>
+                  <div className="text-emerald-400 uppercase font-bold">
+                    {selectedNode.metadata?.relationship_kind || (selectedNode.depth <= 1 ? 'direct' : 'inferred')}
+                  </div>
                 </div>
                 {selectedNode.confidence !== undefined && selectedNode.confidence !== null && (
                   <div className="col-span-2 pt-1 border-t border-cyber-border/30">
@@ -429,16 +431,46 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
                 )}
               </div>
 
+              {/* Supporting Evidence Excerpt */}
+              {selectedNode.metadata?.evidence_excerpt && (
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Supporting Text Excerpt</span>
+                  <blockquote className="bg-cyber-card/60 p-2.5 rounded-lg border-l-2 border-cyber-cyan text-[11px] text-slate-300 mt-1 italic leading-relaxed">
+                    &quot;{String(selectedNode.metadata.evidence_excerpt)}&quot;
+                  </blockquote>
+                </div>
+              )}
+
+              {/* Source Link */}
+              {selectedNode.metadata?.source_url && (
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Original Source Document</span>
+                  <div className="mt-1">
+                    <a
+                      href={selectedNode.metadata.source_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded bg-cyber-card border border-cyber-border text-[11px] text-cyber-cyan hover:underline hover:border-cyber-cyan transition-colors break-all"
+                    >
+                      <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate max-w-[200px]">{selectedNode.metadata.source_title || selectedNode.metadata.source_url}</span>
+                    </a>
+                  </div>
+                </div>
+              )}
+
               {selectedNode.metadata && Object.keys(selectedNode.metadata).length > 0 && (
                 <div>
                   <span className="text-[10px] text-slate-400 uppercase">Provenance Metadata</span>
                   <div className="bg-cyber-card/70 p-3 rounded-lg border border-cyber-border/40 mt-1 space-y-1.5 text-[11px] text-slate-300">
-                    {Object.entries(selectedNode.metadata).map(([k, v]) => (
-                      <div key={k} className="flex justify-between gap-2">
-                        <span className="text-slate-400 capitalize">{k.replace(/_/g, ' ')}:</span>
-                        <span className="text-white truncate max-w-[180px]">{String(v)}</span>
-                      </div>
-                    ))}
+                    {Object.entries(selectedNode.metadata)
+                      .filter(([k]) => !['evidence_excerpt', 'source_url', 'source_title'].includes(k))
+                      .map(([k, v]) => (
+                        <div key={k} className="flex justify-between gap-2">
+                          <span className="text-slate-400 capitalize">{k.replace(/_/g, ' ')}:</span>
+                          <span className="text-white truncate max-w-[180px]">{String(v)}</span>
+                        </div>
+                      ))}
                   </div>
                 </div>
               )}

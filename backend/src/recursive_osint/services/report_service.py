@@ -23,6 +23,12 @@ class ReportService:
         docs_list = await self.evidence_repo.list_documents(investigation.id)
         entities_list = await self.evidence_repo.list_entities(investigation.id)
 
+        # Separate verified evidence from simulated / mock demo records
+        real_evidence = [e for e in evidence_list if not getattr(e, "is_simulated", False)]
+        simulated_evidence = [e for e in evidence_list if getattr(e, "is_simulated", False)]
+        real_docs = [d for d in docs_list if d.connector_name not in ("mock_demo", "mock")]
+        simulated_docs = [d for d in docs_list if d.connector_name in ("mock_demo", "mock")]
+
         # Build Markdown report
         lines = [
             f"# OSINT Investigation Report: {investigation.title}",
@@ -37,18 +43,32 @@ class ReportService:
             "> [!IMPORTANT]",
             "> All source statements are cited directly from public web data. Identity correlations and entity links are probabilistic system inferences and require human corroboration before establishing conclusive identity claims.",
             "",
-            f"Total Sources Discovered: **{len(docs_list)}** | Total Correlated Evidence: **{len(evidence_list)}** | Total Entities: **{len(entities_list)}**",
-            "",
-            "## 2. Key Evidence & Discovered Passages",
+            f"Verified Sources: **{len(real_docs)}** | Verified Evidence Records: **{len(real_evidence)}** | Extracted Entities: **{len(entities_list)}**",
         ]
 
-        if not evidence_list:
-            lines.append("_No evidence records captured for this investigation._")
+        if simulated_evidence:
+            lines.extend([
+                "",
+                "> [!WARNING]",
+                f"> **Simulated Data Notice**: {len(simulated_evidence)} mock demo records exist in this dossier. They are labeled UNVERIFIED and excluded from verified evidence counts and executive conclusions.",
+            ])
+
+        lines.extend([
+            "",
+            "## 2. Key Verified Evidence & Supporting Passages",
+        ])
+
+        if not real_evidence:
+            lines.append("_No verified evidence records captured for this investigation._")
         else:
-            for idx, ev in enumerate(evidence_list[:15], 1):
+            for idx, ev in enumerate(real_evidence[:15], 1):
+                source_link = f"[{ev.source_url}]({ev.source_url})" if ev.source_url else "N/A"
+                conn_name = ev.connector_name or "unknown"
                 lines.extend([
                     f"### {idx}. {ev.title}",
-                    f"- **Confidence:** `{ev.confidence_level.upper()}` (Relevance: {ev.relevance_score:.2f}, Uncertainty: {ev.uncertainty_score:.2f})",
+                    f"- **Source:** {conn_name.upper()} | **URL:** {source_link}",
+                    f"- **Heuristic Confidence:** `{ev.confidence_level.upper()}` (Relevance: {ev.relevance_score:.2f}, Uncertainty: {ev.uncertainty_score:.2f})",
+                    f"- **Verification Status:** `{ev.source_verification_status.upper()}`",
                     f"- **Inclusion Rationale:** {ev.why_included}",
                     f"- **Passage:**",
                     f"  > \"{ev.extracted_passage}\"",
@@ -72,8 +92,16 @@ class ReportService:
             "",
             "## 4. Discovered Sources & Provenance",
         ])
-        for doc in docs_list[:20]:
+        for doc in real_docs[:20]:
             lines.append(f"- [{doc.title}]({doc.url}) — *Connector: {doc.connector_name}* (Retrieved: {doc.retrieved_at.strftime('%Y-%m-%d')})")
+
+        if simulated_docs:
+            lines.extend([
+                "",
+                "## 5. Simulated / Demo Sources (Isolated)",
+            ])
+            for doc in simulated_docs[:10]:
+                lines.append(f"- [MOCK] {doc.title} — *Source: {doc.connector_name}* (Excluded from real conclusions)")
 
         report_markdown = "\n".join(lines)
 
