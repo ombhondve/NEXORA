@@ -8,6 +8,7 @@ from recursive_osint.config import (
     Settings,
     normalize_database_url,
     resolve_active_database_url,
+    resolve_active_redis_url,
 )
 
 
@@ -132,3 +133,55 @@ class TestDatabaseConfiguration:
         with pytest.raises(ValueError, match="FATAL \\[Config\\]: ENVIRONMENT appears to be set to a connection URL"):
             s = Settings()
             s.validate_production_readiness()
+
+
+class TestRedisConfiguration:
+    def test_redis_redis_url_precedence(self, monkeypatch):
+        """Confirm Redis_REDIS_URL takes precedence over REDIS_URL."""
+        monkeypatch.setenv("Redis_REDIS_URL", "redis://default:token_vercel@ep-upstash-1.upstash.io:6379")
+        monkeypatch.setenv("REDIS_URL", "redis://fallback_user:fallback_pass@localhost:6379/1")
+
+        raw_url, source = resolve_active_redis_url()
+        assert source == "Redis_REDIS_URL"
+        assert "ep-upstash-1.upstash.io:6379" in raw_url
+        assert "token_vercel" in raw_url
+
+        s = Settings()
+        assert s.REDIS_SOURCE == "Redis_REDIS_URL"
+        assert s.REDIS_URL == "redis://default:token_vercel@ep-upstash-1.upstash.io:6379"
+
+    def test_redis_url_fallback(self, monkeypatch):
+        """Confirm REDIS_URL is used when Redis_REDIS_URL is absent or empty."""
+        monkeypatch.delenv("Redis_REDIS_URL", raising=False)
+        monkeypatch.setenv("REDIS_URL", "redis://user:pass@localhost:6379/2")
+
+        raw_url, source = resolve_active_redis_url()
+        assert source == "REDIS_URL"
+        assert "user:pass@localhost:6379/2" in raw_url
+
+        s = Settings()
+        assert s.REDIS_SOURCE == "REDIS_URL"
+        assert s.REDIS_URL == "redis://user:pass@localhost:6379/2"
+
+    def test_redis_default_when_unset(self, monkeypatch):
+        """Confirm default Redis URL is used when neither variable is set."""
+        monkeypatch.delenv("Redis_REDIS_URL", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+
+        raw_url, source = resolve_active_redis_url()
+        assert source == "default_redis"
+        assert raw_url == "redis://localhost:6379/0"
+
+        s = Settings()
+        assert s.REDIS_SOURCE == "default_redis"
+        assert s.REDIS_URL == "redis://localhost:6379/0"
+
+    def test_redis_password_redaction(self, monkeypatch):
+        """Confirm passwords in Redis_REDIS_URL are masked in logs and diagnostic outputs."""
+        monkeypatch.setenv("Redis_REDIS_URL", "redis://default:super_secret_redis_token@ep-upstash.io:6379")
+
+        s = Settings()
+        redacted = s.get_redacted_redis_url()
+        assert "super_secret_redis_token" not in redacted
+        assert "default:***@ep-upstash.io:6379" in redacted
+

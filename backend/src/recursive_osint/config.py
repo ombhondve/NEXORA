@@ -92,6 +92,24 @@ def resolve_active_database_url() -> tuple[str, str]:
     return "", "none"
 
 
+def resolve_active_redis_url() -> tuple[str, str]:
+    """
+    Resolves the active Redis connection string based on strict precedence:
+    1. Redis_REDIS_URL (Preferred Vercel integration variable name)
+    2. REDIS_URL (Standard fallback / local development)
+    Returns: (raw_url, source_variable_name)
+    """
+    val = os.getenv("Redis_REDIS_URL")
+    if val and val.strip():
+        return val.strip(), "Redis_REDIS_URL"
+
+    val = os.getenv("REDIS_URL")
+    if val and val.strip():
+        return val.strip(), "REDIS_URL"
+
+    return "redis://localhost:6379/0", "default_redis"
+
+
 class Settings(BaseModel):
     # General App Config
     APP_NAME: str = Field(default_factory=lambda: os.getenv("APP_NAME", "Recursive OSINT Discovery Engine"))
@@ -192,8 +210,13 @@ class Settings(BaseModel):
             return re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", url)
 
     # Redis (Task Queue & Cache)
-    REDIS_URL: str = Field(default_factory=lambda: os.getenv("REDIS_URL", "redis://localhost:6379/0"))
+    REDIS_SOURCE: str = Field(default_factory=lambda: resolve_active_redis_url()[1])
+    REDIS_URL: str = Field(default_factory=lambda: resolve_active_redis_url()[0])
     REDIS_CACHE_TTL_SECONDS: int = Field(default_factory=lambda: int(os.getenv("REDIS_CACHE_TTL_SECONDS", "3600")))
+
+    def get_redacted_redis_url(self) -> str:
+        """Returns the Redis URL with password redacted for safe logging."""
+        return self.get_redacted_url(self.REDIS_URL)
 
     # OpenSearch
     OPENSEARCH_URL: str = Field(default_factory=lambda: os.getenv("OPENSEARCH_URL", "http://localhost:9200"))
