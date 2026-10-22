@@ -15,7 +15,10 @@ import {
   ExtractedEntity,
   InvestigationReport,
   LeadGraphResponse,
+  AIInvestigationAnalysis,
 } from '@/types';
+import { AIIntelligenceTab } from '@/components/ai/AIIntelligenceTab';
+import { AskNexoraTab } from '@/components/ai/AskNexoraTab';
 import {
   Compass,
   ArrowLeft,
@@ -33,6 +36,9 @@ import {
   RefreshCw,
   Network,
   AlertCircle,
+  Brain,
+  MessageSquare,
+  Sparkles,
 } from 'lucide-react';
 
 interface ComponentProps {
@@ -55,8 +61,9 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
   const [entities, setEntities] = useState<ExtractedEntity[]>([]);
   const [report, setReport] = useState<InvestigationReport | null>(null);
   const [graph, setGraph] = useState<LeadGraphResponse | null>(null);
+  const [aiAnalysis, setAiAnalysis] = useState<AIInvestigationAnalysis | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'graph' | 'evidence' | 'entities' | 'sources' | 'events' | 'report'>('graph');
+  const [activeTab, setActiveTab] = useState<'graph' | 'ai_analysis' | 'ai_qa' | 'evidence' | 'entities' | 'sources' | 'events' | 'report'>('graph');
   const [loading, setLoading] = useState(true);
   const [graphLoading, setGraphLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -76,12 +83,13 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
       setInvestigation(inv);
 
       // Load related collections with non-fatal fallbacks
-      const [evts, evds, docs, ents, grph] = await Promise.all([
+      const [evts, evds, docs, ents, grph, analysis] = await Promise.all([
         api.getEvents(investigationId).catch(() => [] as InvestigationEvent[]),
         api.getEvidence(investigationId).catch(() => [] as EvidenceRecord[]),
         api.getDocuments(investigationId).catch(() => [] as SourceDocument[]),
         api.getEntities(investigationId).catch(() => [] as ExtractedEntity[]),
         api.getLeadGraph(investigationId).catch(() => null),
+        api.getInvestigationAnalysis(investigationId).catch(() => null),
       ]);
 
       setEvents(evts);
@@ -89,6 +97,7 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
       setDocuments(docs);
       setEntities(ents);
       setGraph(grph);
+      setAiAnalysis(analysis);
     } catch (err: any) {
       console.error('Failed to load investigation details:', err);
       const msg = err?.message || '';
@@ -131,6 +140,20 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
     setActionLoading(true);
     try {
       const rep = await api.getReport(investigation.id);
+      setReport(rep);
+      setActiveTab('report');
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleFetchAIReport = async () => {
+    if (!investigation) return;
+    setActionLoading(true);
+    try {
+      const rep = await api.getAIReport(investigation.id);
       setReport(rep);
       setActiveTab('report');
     } catch (err) {
@@ -321,10 +344,19 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
             <button
               onClick={handleFetchReport}
               disabled={actionLoading}
+              className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-300 bg-cyber-card border border-cyber-border hover:border-slate-500 font-semibold transition-all disabled:opacity-50"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              <span>Standard Report</span>
+            </button>
+
+            <button
+              onClick={handleFetchAIReport}
+              disabled={actionLoading}
               className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-mono text-slate-950 bg-cyber-cyan hover:bg-cyan-400 font-semibold shadow-glow-cyan transition-all disabled:opacity-50"
             >
-              <FileDown className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>Synthesize Report</span>
+              <Sparkles className="w-3.5 h-3.5 stroke-[2.5]" />
+              <span>Synthesize AI Report</span>
             </button>
           </div>
         </div>
@@ -417,6 +449,8 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
         <div className="flex border-b border-cyber-border/80 space-x-2 text-xs font-mono overflow-x-auto pb-1">
           {[
             { id: 'graph', label: `Lead Graph (${graph?.total_nodes || 0})`, icon: Network },
+            { id: 'ai_analysis', label: 'AI Intelligence', icon: Brain },
+            { id: 'ai_qa', label: 'Ask NEXORA', icon: MessageSquare },
             { id: 'evidence', label: `Correlated Evidence (${evidence.length})`, icon: ShieldCheck },
             { id: 'entities', label: `Entities (${entities.length})`, icon: Database },
             { id: 'sources', label: `Sources (${documents.length})`, icon: Globe },
@@ -451,6 +485,23 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
               loading={graphLoading}
               error={null}
               onRetry={loadData}
+            />
+          )}
+
+          {/* AI Intelligence Tab */}
+          {activeTab === 'ai_analysis' && (
+            <AIIntelligenceTab
+              investigationId={investigation.id}
+              evidence={evidence}
+              initialAnalysis={aiAnalysis}
+            />
+          )}
+
+          {/* Ask NEXORA (Evidence-Grounded Q&A) */}
+          {activeTab === 'ai_qa' && (
+            <AskNexoraTab
+              investigationId={investigation.id}
+              evidence={evidence}
             />
           )}
 
@@ -581,13 +632,37 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
           {/* Report Tab */}
           {activeTab === 'report' && (
             <div className="glass-panel rounded-xl border border-cyber-border p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-cyber-border/60">
+                <div className="flex items-center space-x-2">
+                  <FileDown className="w-4 h-4 text-cyber-cyan" />
+                  <span className="font-bold text-white text-xs">Investigation Dossier Synthesis</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={handleFetchReport}
+                    disabled={actionLoading}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-mono text-slate-300 bg-cyber-card border border-cyber-border hover:border-slate-500 transition-all disabled:opacity-50"
+                  >
+                    Standard Report
+                  </button>
+                  <button
+                    onClick={handleFetchAIReport}
+                    disabled={actionLoading}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-mono text-slate-950 bg-cyber-cyan hover:bg-cyan-400 font-bold shadow-glow-cyan transition-all flex items-center space-x-1 disabled:opacity-50"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>Synthesize AI Intelligence Dossier</span>
+                  </button>
+                </div>
+              </div>
+
               {report ? (
                 <div className="prose prose-invert max-w-none text-xs font-mono whitespace-pre-wrap leading-relaxed text-slate-200 bg-cyber-bg/80 p-6 rounded-lg border border-cyber-border">
                   {report.summary_markdown}
                 </div>
               ) : (
                 <div className="text-center py-8 space-y-3 font-mono text-xs text-slate-400">
-                  <p>Click &quot;Synthesize Report&quot; above to compile verified findings and provenance data.</p>
+                  <p>Choose an option above to generate a deterministic OSINT report or an AI-assisted intelligence dossier.</p>
                 </div>
               )}
             </div>

@@ -40,6 +40,7 @@ class Investigation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     entities = relationship("ExtractedEntity", back_populates="investigation", cascade="all, delete-orphan")
     events = relationship("InvestigationEvent", back_populates="investigation", cascade="all, delete-orphan")
     reports = relationship("ReportExport", back_populates="investigation", cascade="all, delete-orphan")
+    ai_analyses = relationship("InvestigationAIAnalysis", back_populates="investigation", cascade="all, delete-orphan")
 
 
 class InvestigationRun(Base, UUIDPrimaryKeyMixin, TimestampMixin):

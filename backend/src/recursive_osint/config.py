@@ -374,6 +374,14 @@ class Settings(BaseModel):
     SERPER_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("SERPER_API_KEY", None))
     BRAVE_SEARCH_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("BRAVE_SEARCH_API_KEY", None))
 
+    # Phase 2: Local AI Intelligence Layer (Ollama / Qwen3:4b)
+    AI_ENABLED: bool = Field(default_factory=lambda: os.getenv("AI_ENABLED", "true").lower() in ("true", "1"))
+    OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"))
+    OLLAMA_MODEL: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen3:4b"))
+    OLLAMA_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120.0")))
+    AI_MAX_EVIDENCE_ITEMS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_EVIDENCE_ITEMS", "20")))
+    AI_MAX_INPUT_TOKENS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_INPUT_TOKENS", "4096")))
+
     def validate_production_readiness(self) -> None:
         """
         Enforces strict production safety assertions:

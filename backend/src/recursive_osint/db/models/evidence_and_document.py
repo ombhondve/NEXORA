@@ -72,7 +72,9 @@ class EvidenceRecord(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     def is_simulated(self) -> bool:
         if self.document and self.document.connector_name in ("mock_demo", "mock"):
             return True
-        return not self.is_verified_source_statement or "simulated" in (self.why_included or "").lower()
+        if self.is_verified_source_statement is False:
+            return True
+        return "simulated" in (self.why_included or "").lower()
 
     @property
     def source_verification_status(self) -> str:

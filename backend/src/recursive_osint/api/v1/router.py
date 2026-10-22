@@ -9,6 +9,7 @@ from recursive_osint.api.v1.endpoints import (
     search,
     sources,
     health,
+    ai,
 )
 
 api_v1_router = APIRouter()
@@ -18,3 +19,4 @@ api_v1_router.include_router(auth.router)
 api_v1_router.include_router(investigations.router)
 api_v1_router.include_router(search.router)
 api_v1_router.include_router(sources.router)
+api_v1_router.include_router(ai.router)

@@ -89,6 +89,7 @@ class GraphEdge(BaseModel):
     evidence_title: Optional[str] = None
     source_url: Optional[str] = None
     confidence_rationale: Optional[str] = None
+    origin: str = "deterministic"  # source_derived, deterministic, ai_inferred
 
 
 class LeadGraphResponse(BaseModel):

@@ -27,6 +27,7 @@ from recursive_osint.db.models.audit_and_usage import (
     AuditLog,
     UsageRecord,
 )
+from recursive_osint.db.models.ai_analysis import InvestigationAIAnalysis
 
 __all__ = [
     "User",
@@ -45,4 +46,5 @@ __all__ = [
     "EntityRelationship",
     "AuditLog",
     "UsageRecord",
+    "InvestigationAIAnalysis",
 ]

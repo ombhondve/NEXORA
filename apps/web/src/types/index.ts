@@ -132,6 +132,7 @@ export interface GraphEdge {
   evidence_title?: string;
   source_url?: string;
   confidence_rationale?: string;
+  origin?: 'source_derived' | 'deterministic' | 'ai_inferred';
 }
 
 export interface LeadGraphResponse {
@@ -142,4 +143,66 @@ export interface LeadGraphResponse {
   total_nodes: number;
   total_edges: number;
   is_empty: boolean;
+}
+
+export interface AIHealthResponse {
+  status: 'ready' | 'disabled' | 'unreachable' | 'model_unavailable' | 'error';
+  provider: string;
+  model: string;
+  ollama_base_url: string;
+  details: string;
+}
+
+export interface AIEvidenceSummaryItem {
+  evidence_id: string;
+  source_title: string;
+  main_subject: string;
+  key_facts: string[];
+  relevance_to_investigation: string;
+  limitations?: string | null;
+}
+
+export interface AIEntityCandidate {
+  entity_type: string;
+  entity_value: string;
+  normalized_value: string;
+  evidence_ids: string[];
+  context_snippet: string;
+  confidence: number;
+}
+
+export interface AIRelationshipCandidate {
+  source_entity: string;
+  target_entity: string;
+  relationship_type: string;
+  relationship_kind: string;
+  evidence_ids: string[];
+  explanation: string;
+  confidence: number;
+}
+
+export interface AIInvestigationAnalysis {
+  investigation_id: string;
+  model_name: string;
+  objective: string;
+  executive_summary: string;
+  key_findings: string[];
+  evidence_summaries: AIEvidenceSummaryItem[];
+  entities: AIEntityCandidate[];
+  relationships: AIRelationshipCandidate[];
+  conflicts_and_limitations: string[];
+  missing_information: string[];
+  unverified_claims: string[];
+  analyzed_evidence_count: number;
+  created_at?: string;
+}
+
+export interface AIQuestionResponse {
+  investigation_id: string;
+  question: string;
+  answer: string;
+  supporting_evidence_ids: string[];
+  supporting_source_urls: string[];
+  insufficient_evidence: boolean;
+  confidence_assessment: string;
 }

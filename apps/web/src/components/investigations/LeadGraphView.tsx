@@ -253,6 +253,9 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
             <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-emerald-400"></span> Extracted Entity
             </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span> AI Inferred Link
+            </span>
           </div>
 
           <div
@@ -287,6 +290,17 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
                 >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" opacity="0.7" />
                 </marker>
+                <marker
+                  id="arrow-amber"
+                  viewBox="0 0 10 10"
+                  refX="18"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#f59e0b" opacity="0.8" />
+                </marker>
               </defs>
 
               {/* Render Connection Edges */}
@@ -295,9 +309,23 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
                 const tgtPos = nodePositions.get(edge.target);
                 if (!srcPos || !tgtPos) return null;
 
+                const isAI = edge.origin === 'ai_inferred';
                 const isEntity = edge.source.startsWith('ent:') || edge.target.startsWith('ent:');
                 const isSelected =
                   selectedNode && (selectedNode.id === edge.source || selectedNode.id === edge.target);
+
+                const strokeColor = isSelected
+                  ? '#00f2ff'
+                  : isAI
+                  ? '#f59e0b'
+                  : isEntity
+                  ? '#10b981'
+                  : '#38bdf8';
+                const marker = isAI
+                  ? 'url(#arrow-amber)'
+                  : isEntity
+                  ? 'url(#arrow-green)'
+                  : 'url(#arrow)';
 
                 return (
                   <g key={edge.id} className="transition-all">
@@ -306,16 +334,16 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
                       y1={srcPos.y}
                       x2={tgtPos.x}
                       y2={tgtPos.y}
-                      stroke={isSelected ? '#00f2ff' : isEntity ? '#10b981' : '#38bdf8'}
+                      stroke={strokeColor}
                       strokeWidth={isSelected ? 2 : 1.2}
-                      strokeDasharray={isEntity ? '3 3' : 'none'}
-                      opacity={isSelected ? 0.9 : 0.4}
-                      markerEnd={isEntity ? 'url(#arrow-green)' : 'url(#arrow)'}
+                      strokeDasharray={isAI ? '4 3' : isEntity ? '3 3' : 'none'}
+                      opacity={isSelected ? 0.95 : 0.5}
+                      markerEnd={marker}
                     />
                     <text
                       x={(srcPos.x + tgtPos.x) / 2}
                       y={(srcPos.y + tgtPos.y) / 2 - 4}
-                      fill="#64748b"
+                      fill={isAI ? '#f59e0b' : '#64748b'}
                       fontSize="9"
                       fontFamily="monospace"
                       textAnchor="middle"

@@ -8,6 +8,9 @@ import {
   SourceConnectorStatus,
   InvestigationReport,
   LeadGraphResponse,
+  AIHealthResponse,
+  AIInvestigationAnalysis,
+  AIQuestionResponse,
 } from '@/types';
 import { getFrontendConfig } from './config';
 
@@ -128,6 +131,34 @@ class ApiClient {
   // Lead Graph
   async getLeadGraph(id: string): Promise<LeadGraphResponse> {
     return this.request<LeadGraphResponse>(`/investigations/${id}/graph`);
+  }
+
+  // AI Intelligence Layer (Phase 2)
+  async getAIHealth(): Promise<AIHealthResponse> {
+    return this.request<AIHealthResponse>('/ai/health');
+  }
+
+  async analyzeInvestigation(id: string): Promise<AIInvestigationAnalysis> {
+    return this.request<AIInvestigationAnalysis>(`/investigations/${id}/ai/analyze`, {
+      method: 'POST',
+    });
+  }
+
+  async getInvestigationAnalysis(id: string): Promise<AIInvestigationAnalysis | null> {
+    return this.request<AIInvestigationAnalysis | null>(`/investigations/${id}/ai/analysis`);
+  }
+
+  async askInvestigation(id: string, question: string): Promise<AIQuestionResponse> {
+    return this.request<AIQuestionResponse>(`/investigations/${id}/ai/ask`, {
+      method: 'POST',
+      body: JSON.stringify({ question }),
+    });
+  }
+
+  async getAIReport(id: string): Promise<InvestigationReport> {
+    return this.request<InvestigationReport>(`/investigations/${id}/ai/report`, {
+      method: 'POST',
+    });
   }
 }
 

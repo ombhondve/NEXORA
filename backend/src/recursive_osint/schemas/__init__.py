@@ -30,6 +30,16 @@ from recursive_osint.schemas.evidence import (
     SourceConnectorStatusResponse,
     InvestigationReportResponse,
 )
+from recursive_osint.schemas.ai import (
+    AIHealthResponse,
+    AIEvidenceSummaryItem,
+    AIEntityCandidate,
+    AIRelationshipCandidate,
+    AIInvestigationAnalysis,
+    AIQuestionRequest,
+    AIQuestionResponse,
+    AIReportRequest,
+)
 
 __all__ = [
     "UserCreate",
@@ -52,4 +62,12 @@ __all__ = [
     "EntityRelationshipResponse",
     "SourceConnectorStatusResponse",
     "InvestigationReportResponse",
+    "AIHealthResponse",
+    "AIEvidenceSummaryItem",
+    "AIEntityCandidate",
+    "AIRelationshipCandidate",
+    "AIInvestigationAnalysis",
+    "AIQuestionRequest",
+    "AIQuestionResponse",
+    "AIReportRequest",
 ]

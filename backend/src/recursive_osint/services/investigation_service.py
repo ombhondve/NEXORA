@@ -4,10 +4,12 @@ Manages lifecycle of investigations, dispatching discovery runs, and query logs.
 """
 
 from typing import List, Optional
+from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recursive_osint.core.exceptions import EntityNotFoundError, SecurityException, AccessDeniedError
 from recursive_osint.db.models.investigation import Investigation, InvestigationEvent
+from recursive_osint.db.models.ai_analysis import InvestigationAIAnalysis
 from recursive_osint.db.repositories.investigation_repo import InvestigationRepository
 from recursive_osint.db.repositories.evidence_repo import EvidenceRepository
 from recursive_osint.discovery.controller import RecursiveDiscoveryEngine
@@ -268,9 +270,57 @@ class InvestigationService:
                                 confidence=rel.confidence,
                                 relationship_kind="inferred",
                                 confidence_rationale=rel.provenance_notes or "Correlated relationship across documents",
+                                origin="deterministic",
                             )
                         )
                         seen_edge_keys.add(edge_key)
+
+        # 5. Integrate AI-Generated Contextual Relationship Candidates
+        try:
+            stmt = (
+                select(InvestigationAIAnalysis)
+                .where(InvestigationAIAnalysis.investigation_id == investigation_id)
+                .order_by(desc(InvestigationAIAnalysis.created_at))
+                .limit(1)
+            )
+            ai_res = await self.session.execute(stmt)
+            latest_ai = ai_res.scalar_one_or_none()
+            if latest_ai and latest_ai.relationships_json:
+                # Build lookup mapping lowercase label to node id
+                node_label_to_id = {node.label.lower(): node.id for node in nodes}
+
+                for ai_rel in latest_ai.relationships_json:
+                    src_name = str(ai_rel.get("source_entity", "")).strip().lower()
+                    tgt_name = str(ai_rel.get("target_entity", "")).strip().lower()
+                    rel_type = ai_rel.get("relationship_type", "associated_with")
+                    evidence_ids = ai_rel.get("evidence_ids", [])
+                    explanation = ai_rel.get("explanation", "AI contextual correlation")
+                    confidence = float(ai_rel.get("confidence", 0.65))
+                    rel_kind = ai_rel.get("relationship_kind", "inferred")
+
+                    src_node_id = node_label_to_id.get(src_name)
+                    tgt_node_id = node_label_to_id.get(tgt_name)
+
+                    if src_node_id and tgt_node_id and src_node_id != tgt_node_id:
+                        edge_key = (src_node_id, tgt_node_id, rel_type)
+                        if edge_key not in seen_edge_keys:
+                            primary_ev_id = evidence_ids[0] if evidence_ids else None
+                            edges.append(
+                                GraphEdge(
+                                    id=f"ai_edge:{src_node_id}->{tgt_node_id}:{rel_type}",
+                                    source=src_node_id,
+                                    target=tgt_node_id,
+                                    label=rel_type,
+                                    confidence=confidence,
+                                    relationship_kind=rel_kind,
+                                    evidence_id=primary_ev_id,
+                                    confidence_rationale=f"AI Inferred: {explanation}",
+                                    origin="ai_inferred",
+                                )
+                            )
+                            seen_edge_keys.add(edge_key)
+        except Exception:
+            pass  # Fail gracefully without blocking deterministic graph
 
         is_empty = len(nodes) <= 1 and len(edges) == 0
 
