@@ -2,16 +2,32 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// Dynamically locate apps/web directory
+// Dynamically locate the apps/web directory from any starting context
 let webDir;
-if (fs.existsSync(path.resolve(__dirname, '../apps/web/package.json'))) {
+const candidates = [
+  path.resolve(__dirname, '../apps/web'),
+  path.resolve(__dirname, '../web'),
+  path.resolve(__dirname, '../../apps/web'),
+  path.resolve(process.cwd(), 'apps/web'),
+  path.resolve(process.cwd(), 'web'),
+  process.cwd(),
+];
+
+for (const candidate of candidates) {
+  const pkgPath = path.join(candidate, 'package.json');
+  if (fs.existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+      if (pkg.name === 'web' || fs.existsSync(path.join(candidate, 'src/app'))) {
+        webDir = candidate;
+        break;
+      }
+    } catch (_) {}
+  }
+}
+
+if (!webDir) {
   webDir = path.resolve(__dirname, '../apps/web');
-} else if (fs.existsSync(path.resolve(process.cwd(), 'apps/web/package.json'))) {
-  webDir = path.resolve(process.cwd(), 'apps/web');
-} else if (fs.existsSync(path.resolve(process.cwd(), 'web/package.json'))) {
-  webDir = path.resolve(process.cwd(), 'web');
-} else {
-  webDir = process.cwd();
 }
 
 console.log(`[build-web] Building Next.js application in: ${webDir}`);
@@ -25,4 +41,5 @@ if (srcNext !== destNext && fs.existsSync(srcNext)) {
   console.log(`[build-web] Syncing build artifacts to: ${destNext}`);
   fs.cpSync(srcNext, destNext, { recursive: true });
 }
+
 console.log('[build-web] Build completed successfully.');
