@@ -5,6 +5,8 @@ Unit tests for Vercel / Neon database configuration, precedence, and normalizati
 import os
 import pytest
 from recursive_osint.config import (
+    BACKEND_DIR,
+    BACKEND_ENV_PATH,
     Settings,
     normalize_database_url,
     resolve_active_database_url,
@@ -184,4 +186,22 @@ class TestRedisConfiguration:
         redacted = s.get_redacted_redis_url()
         assert "super_secret_redis_token" not in redacted
         assert "default:***@ep-upstash.io:6379" in redacted
+
+
+class TestEnvironmentSeparation:
+    def test_backend_env_paths(self):
+        """Verify BACKEND_DIR and BACKEND_ENV_PATH are correctly resolved relative to config module."""
+        assert BACKEND_DIR.name == "backend"
+        assert BACKEND_ENV_PATH.name == ".env"
+        assert BACKEND_ENV_PATH.parent == BACKEND_DIR
+
+    def test_host_and_port_configuration(self, monkeypatch):
+        """Verify HOST and PORT configuration fields."""
+        monkeypatch.setenv("HOST", "0.0.0.0")
+        monkeypatch.setenv("PORT", "9000")
+
+        s = Settings()
+        assert s.HOST == "0.0.0.0"
+        assert s.PORT == 9000
+
 

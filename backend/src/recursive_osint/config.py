@@ -6,8 +6,25 @@ Vercel / Neon PostgreSQL environment variable conventions.
 
 import os
 import re
+from pathlib import Path
 from typing import List, Optional, Set
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+# Deterministic dotenv loading for backend local development:
+# Locates backend/.env relative to this config file:
+# backend/src/recursive_osint/config.py -> parent(recursive_osint) -> parent(src) -> parent(backend)
+BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+BACKEND_ENV_PATH = BACKEND_DIR / ".env"
+ROOT_ENV_PATH = BACKEND_DIR.parent / ".env"
+
+if BACKEND_ENV_PATH.is_file():
+    # Load backend/.env without overriding existing environment variables
+    # (so Vercel/system/Docker/test env vars take precedence)
+    load_dotenv(dotenv_path=BACKEND_ENV_PATH, override=False)
+elif ROOT_ENV_PATH.is_file():
+    # Backward compatibility fallback during migration
+    load_dotenv(dotenv_path=ROOT_ENV_PATH, override=False)
 
 VALID_ENVIRONMENTS: Set[str] = {"development", "test", "staging", "production"}
 
@@ -117,6 +134,8 @@ class Settings(BaseModel):
     DEBUG: bool = Field(default_factory=lambda: os.getenv("DEBUG", "false").lower() in ("true", "1"))
     LOG_LEVEL: str = Field(default_factory=lambda: os.getenv("LOG_LEVEL", "INFO"))
     API_V1_PREFIX: str = Field(default_factory=lambda: os.getenv("API_V1_PREFIX", "/api/v1"))
+    HOST: str = Field(default_factory=lambda: os.getenv("HOST", "127.0.0.1"))
+    PORT: int = Field(default_factory=lambda: int(os.getenv("PORT", "8000")))
 
     # Security & JWT Auth
     SECRET_KEY: str = Field(

@@ -42,12 +42,25 @@ lerna-debug.log*
 .turbo/
 *.tsbuildinfo
 
-# Environment and Secrets
+# Environment and Secrets (Root)
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+!.env.example
+!.env.*.example
+
+# Frontend Application Environment (apps/web)
+apps/web/.env
+apps/web/.env.*
+apps/web/.env.local
+!apps/web/.env.example
+!apps/web/.env.*.example
+
+# Backend Application Environment (backend)
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.*.example
+
 *.pem
 *.key
 secrets/

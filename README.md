@@ -59,9 +59,21 @@ recursive-osint/
 - (Optional) Docker & Docker Compose for PostgreSQL, Redis, and OpenSearch
 
 ### 2. Environment Setup
-```bash
-cp .env.example .env
+Create dedicated environment files for frontend and backend:
+
+**PowerShell (Windows):**
+```powershell
+Copy-Item apps/web/.env.example apps/web/.env.local
+Copy-Item backend/.env.example backend/.env
 ```
+
+**Bash (Linux / macOS):**
+```bash
+cp apps/web/.env.example apps/web/.env.local
+cp backend/.env.example backend/.env
+```
+
+See [docs/ENVIRONMENT_SETUP.md](docs/ENVIRONMENT_SETUP.md) for full configuration options, production readiness, and Vercel deployment guides.
 
 ### 3. Backend Setup
 ```bash

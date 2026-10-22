@@ -8,8 +8,9 @@ import {
   SourceConnectorStatus,
   InvestigationReport,
 } from '@/types';
+import { frontendConfig } from './config';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE = frontendConfig.apiUrl;
 
 class ApiClient {
   private getHeaders(): HeadersInit {
