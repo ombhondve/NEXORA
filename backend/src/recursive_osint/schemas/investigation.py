@@ -66,3 +66,31 @@ class QueryLogResponse(BaseModel):
     results_count: int
     execution_duration_ms: float
     created_at: datetime
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: str  # seed, text, domain, entity, url, phrase, source
+    depth: int = 0
+    status: str = "active"
+    confidence: Optional[float] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str = "discovered"
+    confidence: Optional[float] = None
+
+
+class LeadGraphResponse(BaseModel):
+    investigation_id: str
+    target_clue: str
+    nodes: List[GraphNode]
+    edges: List[GraphEdge]
+    total_nodes: int
+    total_edges: int
+    is_empty: bool = False

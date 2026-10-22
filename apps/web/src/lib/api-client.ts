@@ -7,21 +7,24 @@ import {
   SearchResultItem,
   SourceConnectorStatus,
   InvestigationReport,
+  LeadGraphResponse,
 } from '@/types';
-import { frontendConfig } from './config';
-
-const API_BASE = frontendConfig.apiUrl;
+import { getFrontendConfig } from './config';
 
 class ApiClient {
+  private getBaseUrl(): string {
+    return getFrontendConfig().apiUrl;
+  }
+
   private getHeaders(): HeadersInit {
     return {
       'Content-Type': 'application/json',
     };
   }
 
-
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE}/api/v1${endpoint}`;
+    const baseUrl = this.getBaseUrl();
+    const url = `${baseUrl}/api/v1${endpoint}`;
     const res = await fetch(url, {
       ...options,
       headers: {
@@ -120,6 +123,11 @@ class ApiClient {
   // Sources
   async listSources(): Promise<SourceConnectorStatus[]> {
     return this.request<SourceConnectorStatus[]>('/sources');
+  }
+
+  // Lead Graph
+  async getLeadGraph(id: string): Promise<LeadGraphResponse> {
+    return this.request<LeadGraphResponse>(`/investigations/${id}/graph`);
   }
 }
 

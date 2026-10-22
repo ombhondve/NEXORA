@@ -18,10 +18,7 @@ function sanitizeApiUrl(rawUrl: string | undefined): string {
       window.location.hostname !== '127.0.0.1'
     ) {
       if (trimmed.includes('localhost') || trimmed.includes('127.0.0.1')) {
-        console.warn(
-          '[Config Warning]: In production browser environment but NEXT_PUBLIC_API_URL points to localhost. Falling back to origin.'
-        );
-        return window.location.origin;
+        return 'https://nexora-backend.vercel.app';
       }
     }
     return trimmed.replace(/\/+$/, '');
@@ -29,8 +26,12 @@ function sanitizeApiUrl(rawUrl: string | undefined): string {
 
   if (typeof window !== 'undefined') {
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-      return window.location.origin;
+      return 'https://nexora-backend.vercel.app';
     }
+  }
+
+  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+    return 'https://nexora-backend.vercel.app';
   }
 
   return 'http://localhost:8000';

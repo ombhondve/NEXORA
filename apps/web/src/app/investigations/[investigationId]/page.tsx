@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
 import { EvidenceCard } from '@/components/evidence/EvidenceCard';
+import { LeadGraphView } from '@/components/investigations/LeadGraphView';
 import { api } from '@/lib/api-client';
 import {
   Investigation,
@@ -13,6 +14,7 @@ import {
   SourceDocument,
   ExtractedEntity,
   InvestigationReport,
+  LeadGraphResponse,
 } from '@/types';
 import {
   Compass,
@@ -29,12 +31,22 @@ import {
   Clock,
   ExternalLink,
   RefreshCw,
+  Network,
+  AlertCircle,
 } from 'lucide-react';
 
-export default function InvestigationDetailPage() {
-  const params = useParams();
+interface PageProps {
+  params?: {
+    investigationId?: string;
+  };
+}
+
+export default function InvestigationDetailPage({ params }: PageProps) {
+  const clientParams = useParams();
   const router = useRouter();
-  const investigationId = params.investigationId as string;
+
+  const rawId = params?.investigationId || clientParams?.investigationId;
+  const investigationId = (Array.isArray(rawId) ? rawId[0] : rawId) || '';
 
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [events, setEvents] = useState<InvestigationEvent[]>([]);
@@ -42,41 +54,55 @@ export default function InvestigationDetailPage() {
   const [documents, setDocuments] = useState<SourceDocument[]>([]);
   const [entities, setEntities] = useState<ExtractedEntity[]>([]);
   const [report, setReport] = useState<InvestigationReport | null>(null);
+  const [graph, setGraph] = useState<LeadGraphResponse | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'evidence' | 'events' | 'entities' | 'sources' | 'report'>('evidence');
+  const [activeTab, setActiveTab] = useState<'graph' | 'evidence' | 'entities' | 'sources' | 'events' | 'report'>('graph');
   const [loading, setLoading] = useState(true);
+  const [graphLoading, setGraphLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
   const loadData = useCallback(async () => {
-    if (!investigationId) return;
+    if (!investigationId) {
+      setLoading(false);
+      return;
+    }
+    setLoadError(null);
     try {
-      const [inv, evts, evds, docs, ents] = await Promise.all([
-        api.getInvestigation(investigationId),
-        api.getEvents(investigationId),
-        api.getEvidence(investigationId),
-        api.getDocuments(investigationId),
-        api.getEntities(investigationId),
-      ]);
+      // Load core investigation record first
+      const inv = await api.getInvestigation(investigationId);
       setInvestigation(inv);
+
+      // Load related collections with non-fatal fallbacks
+      const [evts, evds, docs, ents, grph] = await Promise.all([
+        api.getEvents(investigationId).catch(() => [] as InvestigationEvent[]),
+        api.getEvidence(investigationId).catch(() => [] as EvidenceRecord[]),
+        api.getDocuments(investigationId).catch(() => [] as SourceDocument[]),
+        api.getEntities(investigationId).catch(() => [] as ExtractedEntity[]),
+        api.getLeadGraph(investigationId).catch(() => null),
+      ]);
+
       setEvents(evts);
       setEvidence(evds);
       setDocuments(docs);
       setEntities(ents);
-    } catch (err) {
+      setGraph(grph);
+    } catch (err: any) {
       console.error('Failed to load investigation details:', err);
+      setLoadError(err?.message || 'Failed to communicate with investigation database.');
     } finally {
       setLoading(false);
+      setGraphLoading(false);
     }
   }, [investigationId]);
 
   useEffect(() => {
     loadData();
-    // Poll while running
     const interval = setInterval(() => {
       if (investigation?.status === 'running') {
         loadData();
       }
-    }, 3000);
+    }, 4000);
     return () => clearInterval(interval);
   }, [loadData, investigation?.status]);
 
@@ -115,6 +141,38 @@ export default function InvestigationDetailPage() {
           <div className="text-center space-y-3 font-mono text-sm text-cyber-cyan">
             <RefreshCw className="w-6 h-6 animate-spin mx-auto text-cyber-cyan" />
             <p>Loading Recursive Investigation Dossier...</p>
+            <span className="text-xs text-slate-500 font-mono">
+              Querying ID: {investigationId || 'pending'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadError && !investigation) {
+    return (
+      <div className="min-h-screen flex flex-col bg-cyber-bg">
+        <Navbar />
+        <div className="flex-1 flex items-center justify-center text-center p-6">
+          <div className="glass-panel max-w-md w-full p-8 rounded-xl border border-rose-900/60 bg-rose-950/20 space-y-4 font-mono">
+            <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+            <h2 className="text-base font-bold text-white">Investigation Retrieval Failed</h2>
+            <p className="text-xs text-rose-300/80 leading-relaxed">{loadError}</p>
+            <div className="flex items-center justify-center space-x-3 pt-2">
+              <button
+                onClick={loadData}
+                className="px-4 py-2 bg-cyber-card border border-cyber-border rounded-lg text-xs text-white hover:border-cyber-cyan transition-colors"
+              >
+                Retry Request
+              </button>
+              <Link
+                href="/dashboard"
+                className="px-4 py-2 bg-transparent text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                Return to Dashboard
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -126,11 +184,21 @@ export default function InvestigationDetailPage() {
       <div className="min-h-screen flex flex-col bg-cyber-bg">
         <Navbar />
         <div className="flex-1 flex items-center justify-center text-center p-6">
-          <div className="space-y-4">
-            <h2 className="text-xl font-bold text-white">Investigation Not Found</h2>
-            <Link href="/dashboard" className="text-xs font-mono text-cyber-cyan hover:underline">
-              Return to Dashboard
-            </Link>
+          <div className="glass-panel max-w-md w-full p-8 rounded-xl border border-cyber-border space-y-4 font-mono">
+            <Compass className="w-10 h-10 text-slate-500 mx-auto" />
+            <h2 className="text-lg font-bold text-white">Investigation Not Found</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              No investigation record matches ID: <code className="text-cyber-cyan">{investigationId}</code>.
+            </p>
+            <div className="pt-2">
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-lg text-xs bg-cyber-card border border-cyber-border text-cyber-cyan hover:underline"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Return to Dashboard</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -183,7 +251,9 @@ export default function InvestigationDetailPage() {
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono uppercase bg-cyan-950 text-cyber-cyan border border-cyber-cyan/30">
                   {investigation.clue_type}
                 </span>
-                <span className="text-xs font-mono text-slate-400">ID: {investigation.id.substring(0, 8)}...</span>
+                <span className="text-xs font-mono text-slate-400">
+                  ID: {investigation.id.length > 8 ? `${investigation.id.substring(0, 8)}...` : investigation.id}
+                </span>
               </div>
               <h1 className="text-xl sm:text-2xl font-bold text-white mt-1">{investigation.title}</h1>
             </div>
@@ -234,10 +304,14 @@ export default function InvestigationDetailPage() {
           </div>
 
           {/* Quick Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-center font-mono">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 text-center font-mono">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+              <div className="text-lg font-bold text-cyber-cyan">{graph?.total_nodes || 0}</div>
+              <div className="text-[10px] text-slate-400 uppercase">Graph Nodes</div>
+            </div>
             <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
               <div className="text-lg font-bold text-white">{evidence.length}</div>
-              <div className="text-[10px] text-slate-400 uppercase">Correlated Evidence</div>
+              <div className="text-[10px] text-slate-400 uppercase">Evidence Records</div>
             </div>
             <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
               <div className="text-lg font-bold text-white">{entities.length}</div>
@@ -245,7 +319,7 @@ export default function InvestigationDetailPage() {
             </div>
             <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
               <div className="text-lg font-bold text-white">{documents.length}</div>
-              <div className="text-[10px] text-slate-400 uppercase">Scanned Documents</div>
+              <div className="text-[10px] text-slate-400 uppercase">Scanned Sources</div>
             </div>
             <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
               <div className="text-lg font-bold text-white">{events.length}</div>
@@ -257,6 +331,7 @@ export default function InvestigationDetailPage() {
         {/* Tab Selection */}
         <div className="flex border-b border-cyber-border/80 space-x-2 text-xs font-mono overflow-x-auto pb-1">
           {[
+            { id: 'graph', label: `Lead Graph (${graph?.total_nodes || 0})`, icon: Network },
             { id: 'evidence', label: `Correlated Evidence (${evidence.length})`, icon: ShieldCheck },
             { id: 'entities', label: `Entities (${entities.length})`, icon: Database },
             { id: 'sources', label: `Sources (${documents.length})`, icon: Globe },
@@ -284,6 +359,16 @@ export default function InvestigationDetailPage() {
 
         {/* Tab Contents */}
         <div className="space-y-4">
+          {/* Lead Graph Tab (Primary Discovery Topology) */}
+          {activeTab === 'graph' && (
+            <LeadGraphView
+              graph={graph}
+              loading={graphLoading}
+              error={null}
+              onRetry={loadData}
+            />
+          )}
+
           {/* Evidence Tab */}
           {activeTab === 'evidence' && (
             <div className="space-y-4">
@@ -311,22 +396,30 @@ export default function InvestigationDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-cyber-border/40 text-slate-300">
-                    {entities.map((e) => (
-                      <tr key={e.id} className="hover:bg-cyber-card/30 transition-colors">
-                        <td className="px-4 py-2.5">
-                          <span className="px-2 py-0.5 rounded bg-cyber-card text-cyber-cyan text-[10px] border border-cyber-border">
-                            {e.entity_type}
-                          </span>
-                        </td>
-                        <td className="px-4 py-2.5 font-bold text-white">{e.entity_value}</td>
-                        <td className="px-4 py-2.5">
-                          <span className="text-emerald-400">{(e.confidence * 100).toFixed(0)}%</span>
-                        </td>
-                        <td className="px-4 py-2.5 text-slate-400 max-w-md truncate">
-                          {e.context_snippet || '—'}
+                    {entities.length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-8 text-center text-slate-400">
+                          No discrete entities extracted yet.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      entities.map((e) => (
+                        <tr key={e.id} className="hover:bg-cyber-card/30 transition-colors">
+                          <td className="px-4 py-2.5">
+                            <span className="px-2 py-0.5 rounded bg-cyber-card text-cyber-cyan text-[10px] border border-cyber-border">
+                              {e.entity_type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-2.5 font-bold text-white">{e.entity_value}</td>
+                          <td className="px-4 py-2.5">
+                            <span className="text-emerald-400">{(e.confidence * 100).toFixed(0)}%</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-slate-400 max-w-md truncate">
+                            {e.context_snippet || '—'}
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -336,55 +429,67 @@ export default function InvestigationDetailPage() {
           {/* Sources Tab */}
           {activeTab === 'sources' && (
             <div className="glass-panel rounded-xl border border-cyber-border overflow-hidden divide-y divide-cyber-border/40">
-              {documents.map((doc) => (
-                <div key={doc.id} className="p-4 flex items-center justify-between gap-4 hover:bg-cyber-card/30 transition-colors">
-                  <div className="space-y-1 max-w-3xl">
-                    <div className="flex items-center space-x-2">
-                      <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyber-card text-cyber-cyan border border-cyber-border uppercase">
-                        {doc.connector_name}
-                      </span>
-                      {doc.publication_date && (
-                        <span className="text-[10px] font-mono text-slate-400">
-                          Published: {doc.publication_date}
-                        </span>
-                      )}
-                    </div>
-                    <h4 className="text-sm font-bold text-white line-clamp-1">{doc.title}</h4>
-                    <p className="text-xs text-slate-400 line-clamp-2">{doc.snippet}</p>
-                  </div>
-                  <a
-                    href={doc.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center space-x-1 text-xs font-mono text-cyber-cyan hover:underline flex-shrink-0"
-                  >
-                    <span>Visit Source</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+              {documents.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-xs font-mono">
+                  No source documents indexed yet for this investigation.
                 </div>
-              ))}
+              ) : (
+                documents.map((doc) => (
+                  <div key={doc.id} className="p-4 flex items-center justify-between gap-4 hover:bg-cyber-card/30 transition-colors">
+                    <div className="space-y-1 max-w-3xl">
+                      <div className="flex items-center space-x-2">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-cyber-card text-cyber-cyan border border-cyber-border uppercase">
+                          {doc.connector_name}
+                        </span>
+                        {doc.publication_date && (
+                          <span className="text-[10px] font-mono text-slate-400">
+                            Published: {doc.publication_date}
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="text-sm font-bold text-white line-clamp-1">{doc.title}</h4>
+                      <p className="text-xs text-slate-400 line-clamp-2">{doc.snippet}</p>
+                    </div>
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center space-x-1 text-xs font-mono text-cyber-cyan hover:underline flex-shrink-0"
+                    >
+                      <span>Visit Source</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  </div>
+                ))
+              )}
             </div>
           )}
 
           {/* Timeline / Events Tab */}
           {activeTab === 'events' && (
             <div className="glass-panel rounded-xl border border-cyber-border p-6 space-y-4">
-              <div className="relative border-l border-cyber-border/80 pl-6 space-y-6">
-                {events.map((evt) => (
-                  <div key={evt.id} className="relative group">
-                    <span className="absolute -left-[31px] top-1 w-2.5 h-2.5 rounded-full bg-cyber-cyan ring-4 ring-cyber-bg"></span>
-                    <div className="text-xs font-mono text-slate-400">
-                      {new Date(evt.created_at).toLocaleTimeString()}
+              {events.length === 0 ? (
+                <div className="text-center py-8 text-slate-400 text-xs font-mono">
+                  No audit events recorded.
+                </div>
+              ) : (
+                <div className="relative border-l border-cyber-border/80 pl-6 space-y-6">
+                  {events.map((evt) => (
+                    <div key={evt.id} className="relative group">
+                      <span className="absolute -left-[31px] top-1 w-2.5 h-2.5 rounded-full bg-cyber-cyan ring-4 ring-cyber-bg"></span>
+                      <div className="text-xs font-mono text-slate-400">
+                        {evt.created_at ? new Date(evt.created_at).toLocaleTimeString() : 'Recent'}
+                      </div>
+                      <div className="text-xs font-mono font-bold text-white mt-0.5">{evt.message}</div>
+                      {evt.details_json && Object.keys(evt.details_json).length > 0 && (
+                        <pre className="text-[10px] font-mono bg-cyber-card/70 p-2 rounded mt-1.5 text-slate-400 overflow-x-auto">
+                          {JSON.stringify(evt.details_json, null, 2)}
+                        </pre>
+                      )}
                     </div>
-                    <div className="text-xs font-mono font-bold text-white mt-0.5">{evt.message}</div>
-                    {evt.details_json && Object.keys(evt.details_json).length > 0 && (
-                      <pre className="text-[10px] font-mono bg-cyber-card/70 p-2 rounded mt-1.5 text-slate-400 overflow-x-auto">
-                        {JSON.stringify(evt.details_json, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 

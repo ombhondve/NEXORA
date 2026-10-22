@@ -18,6 +18,7 @@ from recursive_osint.schemas.investigation import (
     InvestigationCreate,
     InvestigationResponse,
     InvestigationEventResponse,
+    LeadGraphResponse,
 )
 from recursive_osint.schemas.evidence import (
     EvidenceRecordResponse,
@@ -188,3 +189,15 @@ async def get_investigation_report(
     inv = await service.get_investigation(id, user_id)
     rep_service = ReportService(db)
     return await rep_service.generate_report(inv)
+
+
+@router.get("/{id}/graph", response_model=LeadGraphResponse)
+async def get_investigation_graph(
+    id: str,
+    current_user: Optional[User] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Returns the visual lead discovery graph and entity relationship tree."""
+    user_id = current_user.id if current_user else None
+    service = InvestigationService(db)
+    return await service.get_lead_graph(id, user_id)

@@ -9,8 +9,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from recursive_osint.core.exceptions import EntityNotFoundError, SecurityException, AccessDeniedError
 from recursive_osint.db.models.investigation import Investigation, InvestigationEvent
 from recursive_osint.db.repositories.investigation_repo import InvestigationRepository
+from recursive_osint.db.repositories.evidence_repo import EvidenceRepository
 from recursive_osint.discovery.controller import RecursiveDiscoveryEngine
-from recursive_osint.schemas.investigation import InvestigationCreate, InvestigationUpdate
+from recursive_osint.schemas.investigation import (
+    InvestigationCreate,
+    InvestigationUpdate,
+    LeadGraphResponse,
+    GraphNode,
+    GraphEdge,
+)
 
 
 class InvestigationService:
@@ -76,4 +83,132 @@ class InvestigationService:
     async def get_events(self, investigation_id: str, user_id: Optional[str] = None) -> List[InvestigationEvent]:
         await self.get_investigation(investigation_id, user_id)
         return await self.repo.get_events(investigation_id)
+
+    async def get_lead_graph(self, investigation_id: str, user_id: Optional[str] = None) -> LeadGraphResponse:
+        inv = await self.get_investigation(investigation_id, user_id)
+        leads = await self.repo.get_leads(investigation_id)
+
+        evidence_repo = EvidenceRepository(self.session)
+        entities = await evidence_repo.list_entities(investigation_id)
+        relationships = await evidence_repo.list_entity_relationships(investigation_id)
+
+        nodes: List[GraphNode] = []
+        edges: List[GraphEdge] = []
+        seen_node_ids: set[str] = set()
+        seen_edge_keys: set[tuple[str, str, str]] = set()
+
+        # 1. Root seed node
+        root_id = f"seed:{inv.id}"
+        nodes.append(
+            GraphNode(
+                id=root_id,
+                label=inv.target_clue,
+                type="seed",
+                depth=0,
+                status="root",
+                metadata={"title": inv.title, "clue_type": inv.clue_type},
+            )
+        )
+        seen_node_ids.add(root_id)
+
+        # 2. Add Discovery Leads
+        for lead in leads:
+            if lead.id not in seen_node_ids:
+                nodes.append(
+                    GraphNode(
+                        id=lead.id,
+                        label=lead.lead_value,
+                        type=lead.lead_type,
+                        depth=lead.depth,
+                        status=lead.status,
+                        confidence=lead.priority_score,
+                        metadata={
+                            "discovery_reason": lead.discovery_reason,
+                            "priority_score": lead.priority_score,
+                        },
+                    )
+                )
+                seen_node_ids.add(lead.id)
+
+            # Determine parent connection safely
+            parent_id = (
+                lead.parent_lead_id
+                if (lead.parent_lead_id and lead.parent_lead_id in seen_node_ids)
+                else root_id
+            )
+            edge_key = (parent_id, lead.id, "expanded_to")
+            if edge_key not in seen_edge_keys:
+                edges.append(
+                    GraphEdge(
+                        id=f"edge:{parent_id}->{lead.id}",
+                        source=parent_id,
+                        target=lead.id,
+                        label="expanded_to",
+                        confidence=lead.priority_score,
+                    )
+                )
+                seen_edge_keys.add(edge_key)
+
+        # 3. Add Extracted Entities and Relationships
+        for ent in entities:
+            ent_id = f"ent:{ent.id}"
+            if ent_id not in seen_node_ids:
+                nodes.append(
+                    GraphNode(
+                        id=ent_id,
+                        label=ent.entity_value,
+                        type=ent.entity_type,
+                        depth=1,
+                        status="extracted",
+                        confidence=ent.confidence,
+                        metadata={
+                            "normalized_value": ent.normalized_value,
+                            "context": ent.context_snippet,
+                        },
+                    )
+                )
+                seen_node_ids.add(ent_id)
+
+                # Connect to root
+                edge_key = (root_id, ent_id, "mentions")
+                if edge_key not in seen_edge_keys:
+                    edges.append(
+                        GraphEdge(
+                            id=f"edge:{root_id}->{ent_id}",
+                            source=root_id,
+                            target=ent_id,
+                            label="mentions",
+                            confidence=ent.confidence,
+                        )
+                    )
+                    seen_edge_keys.add(edge_key)
+
+        for rel in relationships:
+            src_id = f"ent:{rel.source_entity_id}"
+            tgt_id = f"ent:{rel.target_entity_id}"
+            if src_id in seen_node_ids and tgt_id in seen_node_ids:
+                edge_key = (src_id, tgt_id, rel.relationship_type)
+                if edge_key not in seen_edge_keys:
+                    edges.append(
+                        GraphEdge(
+                            id=f"edge:{src_id}->{tgt_id}",
+                            source=src_id,
+                            target=tgt_id,
+                            label=rel.relationship_type,
+                            confidence=rel.confidence,
+                        )
+                    )
+                    seen_edge_keys.add(edge_key)
+
+        is_empty = len(nodes) <= 1 and len(edges) == 0
+
+        return LeadGraphResponse(
+            investigation_id=inv.id,
+            target_clue=inv.target_clue,
+            nodes=nodes,
+            edges=edges,
+            total_nodes=len(nodes),
+            total_edges=len(edges),
+            is_empty=is_empty,
+        )
 

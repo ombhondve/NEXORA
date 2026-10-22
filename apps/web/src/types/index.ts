@@ -102,3 +102,31 @@ export interface InvestigationReport {
   total_entities_correlated: number;
   generated_at: string;
 }
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;
+  depth: number;
+  status: string;
+  confidence?: number;
+  metadata?: Record<string, any>;
+}
+
+export interface GraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  confidence?: number;
+}
+
+export interface LeadGraphResponse {
+  investigation_id: string;
+  target_clue: string;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total_nodes: number;
+  total_edges: number;
+  is_empty: boolean;
+}
