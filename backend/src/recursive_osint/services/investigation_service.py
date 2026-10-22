@@ -11,6 +11,7 @@ from recursive_osint.db.models.investigation import Investigation, Investigation
 from recursive_osint.db.repositories.investigation_repo import InvestigationRepository
 from recursive_osint.db.repositories.evidence_repo import EvidenceRepository
 from recursive_osint.discovery.controller import RecursiveDiscoveryEngine
+from recursive_osint.extraction.entities import is_noise_domain
 from recursive_osint.schemas.investigation import (
     InvestigationCreate,
     InvestigationUpdate,

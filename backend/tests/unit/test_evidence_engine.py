@@ -194,3 +194,20 @@ class TestBenchmarkQualityMetrics:
 
         canonical_urls = {canonicalize_url(u) for u in raw_urls}
         assert len(canonical_urls) == 1, f"Expected 4 duplicate URLs to resolve to 1 canonical URL, got {len(canonical_urls)}"
+
+    @pytest.mark.asyncio
+    async def test_get_lead_graph_provenance_and_edge_semantics(self):
+        """Verifies that InvestigationService.get_lead_graph builds edges with provenance and relationship_kind."""
+        from recursive_osint.db.session import AsyncSessionLocal
+        from recursive_osint.services.investigation_service import InvestigationService
+
+        async with AsyncSessionLocal() as session:
+            service = InvestigationService(session)
+            invs = await service.repo.list_all()
+            if invs:
+                inv_id = invs[0].id
+                graph = await service.get_lead_graph(inv_id)
+                assert len(graph.nodes) >= 1
+                for edge in graph.edges:
+                    assert edge.relationship_kind in ("direct", "inferred", "unverified")
+                    assert edge.confidence_rationale is not None
