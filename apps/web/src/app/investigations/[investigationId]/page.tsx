@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Navbar } from '@/components/layout/Navbar';
@@ -47,7 +47,7 @@ export default function InvestigationDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     if (!investigationId) return;
     try {
       const [inv, evts, evds, docs, ents] = await Promise.all([
@@ -67,7 +67,7 @@ export default function InvestigationDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [investigationId]);
 
   useEffect(() => {
     loadData();
@@ -78,7 +78,7 @@ export default function InvestigationDetailPage() {
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [investigationId, investigation?.status]);
+  }, [loadData, investigation?.status]);
 
   const handleCancel = async () => {
     if (!investigation) return;
@@ -397,7 +397,7 @@ export default function InvestigationDetailPage() {
                 </div>
               ) : (
                 <div className="text-center py-8 space-y-3 font-mono text-xs text-slate-400">
-                  <p>Click "Synthesize Report" above to compile verified findings and provenance data.</p>
+                  <p>Click &quot;Synthesize Report&quot; above to compile verified findings and provenance data.</p>
                 </div>
               )}
             </div>

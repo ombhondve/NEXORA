@@ -56,7 +56,7 @@ export const EvidenceCard: React.FC<EvidenceCardProps> = ({ evidence }) => {
 
       {/* Extracted Passage */}
       <blockquote className="text-xs text-slate-300 bg-cyber-bg/70 p-3 rounded-lg border-l-2 border-cyber-cyan font-mono leading-relaxed">
-        "{evidence.extracted_passage}"
+        &quot;{evidence.extracted_passage}&quot;
       </blockquote>
 
       {/* Inclusion Rationale */}

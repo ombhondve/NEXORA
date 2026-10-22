@@ -71,7 +71,7 @@ export default function SearchPage() {
         {searched && (
           <div className="flex items-center justify-between text-xs font-mono text-slate-400 border-b border-cyber-border/60 pb-3">
             <span>
-              Discovered <span className="text-cyber-cyan font-bold">{totalResults}</span> records for "{query}"
+              Discovered <span className="text-cyber-cyan font-bold">{totalResults}</span> records for &quot;{query}&quot;
             </span>
             {executionTime && <span>Execution Time: {executionTime.toFixed(1)} ms</span>}
           </div>
