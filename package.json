@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm --prefix apps/web run build",
+    "build": "node scripts/build-web.js",
     "dev": "npm --prefix apps/web run dev",
     "start": "npm --prefix apps/web run start",
     "dev:web": "npm --prefix apps/web run dev",

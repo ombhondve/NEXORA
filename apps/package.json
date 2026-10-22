@@ -1,0 +1,15 @@
+{
+  "name": "osint-apps",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "npm --prefix web run build",
+    "dev": "npm --prefix web run dev",
+    "start": "npm --prefix web run start"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
