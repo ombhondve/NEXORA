@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from recursive_osint.core.exceptions import (
     OSINTException,
     SecurityException,
+    AccessDeniedError,
     SSRFViolationError,
     RateLimitExceededError,
     BudgetExhaustedError,
@@ -46,6 +47,14 @@ def register_exception_handlers(app):
         return JSONResponse(
             status_code=status.HTTP_400_BAD_REQUEST,
             content={"error": "VALIDATION_ERROR", "message": exc.message, "details": exc.details},
+        )
+
+    @app.exception_handler(AccessDeniedError)
+    async def access_denied_handler(request: Request, exc: AccessDeniedError):
+        logger.warning("Access Denied on %s: %s", request.url.path, exc.message)
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN,
+            content={"error": "ACCESS_DENIED", "message": exc.message, "details": exc.details},
         )
 
     @app.exception_handler(SecurityException)

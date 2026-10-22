@@ -3,6 +3,7 @@ Pytest configuration and test fixtures.
 """
 
 import asyncio
+from unittest.mock import patch
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -14,8 +15,8 @@ from recursive_osint.db.models.user import User
 from recursive_osint.core.security import hash_password, create_access_token
 from recursive_osint.main import app
 
-# In-memory SQLite async engine for hermetic test execution
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+# Shared named in-memory SQLite async engine for hermetic test execution
+TEST_DATABASE_URL = "sqlite+aiosqlite:///file:test_db?mode=memory&cache=shared&uri=true"
 
 test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 TestingSessionLocal = async_sessionmaker(
@@ -62,12 +63,13 @@ async def client(db_session: AsyncSession, test_user: User):
 
     token = create_access_token({"sub": test_user.id, "email": test_user.email, "role": test_user.role})
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://testserver",
-        headers={"Authorization": f"Bearer {token}"},
-    ) as ac:
-        yield ac
+    with patch("recursive_osint.api.v1.endpoints.investigations.AsyncSessionLocal", TestingSessionLocal):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers={"Authorization": f"Bearer {token}"},
+        ) as ac:
+            yield ac
 
     app.dependency_overrides.clear()

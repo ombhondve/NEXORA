@@ -4,10 +4,12 @@ Evidence, Source Documents, and Entity schemas.
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class EvidenceRecordResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     document_id: Optional[str] = None
@@ -21,11 +23,10 @@ class EvidenceRecordResponse(BaseModel):
     contradictions_noted: Optional[str] = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class SourceDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     connector_name: str
@@ -37,11 +38,10 @@ class SourceDocumentResponse(BaseModel):
     publication_date: Optional[str] = None
     retrieved_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class ExtractedEntityResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     document_id: Optional[str] = None
@@ -51,11 +51,10 @@ class ExtractedEntityResponse(BaseModel):
     confidence: float
     context_snippet: Optional[str] = None
 
-    class Config:
-        from_attributes = True
-
 
 class EntityRelationshipResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     source_entity_id: str
@@ -63,9 +62,6 @@ class EntityRelationshipResponse(BaseModel):
     relationship_type: str
     confidence: float
     provenance_notes: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class SourceConnectorStatusResponse(BaseModel):

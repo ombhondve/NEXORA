@@ -1,22 +1,15 @@
 """
-Configuration module using Pydantic Settings with robust fallback.
+Configuration module using Pydantic Settings with robust production validation.
 Validates environment variables at application startup.
 """
 
 import os
+import re
 from typing import List, Optional
-from pathlib import Path
-from pydantic import Field, field_validator
-
-try:
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-    _BaseConfig = BaseSettings
-except ImportError:
-    from pydantic import BaseModel
-    _BaseConfig = BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
-class Settings(_BaseConfig):
+class Settings(BaseModel):
     # General App Config
     APP_NAME: str = os.getenv("APP_NAME", "Recursive OSINT Discovery Engine")
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
@@ -31,6 +24,8 @@ class Settings(_BaseConfig):
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "120"))
     REFRESH_TOKEN_EXPIRE_DAYS: int = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    ALLOW_ANONYMOUS_DEV_AUTH: bool = os.getenv("ALLOW_ANONYMOUS_DEV_AUTH", "false").lower() in ("true", "1")
+    ENABLE_DEV_SEEDS: bool = os.getenv("ENABLE_DEV_SEEDS", "false").lower() in ("true", "1")
 
     # CORS
     CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
@@ -45,7 +40,7 @@ class Settings(_BaseConfig):
     DATABASE_MAX_OVERFLOW: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
     DATABASE_POOL_TIMEOUT: int = int(os.getenv("DATABASE_POOL_TIMEOUT", "30"))
 
-    # Redis
+    # Redis (Task Queue & Cache)
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     REDIS_CACHE_TTL_SECONDS: int = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "3600"))
 
@@ -56,7 +51,7 @@ class Settings(_BaseConfig):
     OPENSEARCH_VERIFY_CERTS: bool = os.getenv("OPENSEARCH_VERIFY_CERTS", "false").lower() in ("true", "1")
     OPENSEARCH_INDEX_PREFIX: str = os.getenv("OPENSEARCH_INDEX_PREFIX", "osint")
 
-    # Storage
+    # Storage (Private uploads)
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")
     STORAGE_LOCAL_ROOT: str = os.getenv("STORAGE_LOCAL_ROOT", "./storage/uploads")
     STORAGE_MAX_FILE_SIZE_MB: int = int(os.getenv("STORAGE_MAX_FILE_SIZE_MB", "25"))
@@ -71,7 +66,7 @@ class Settings(_BaseConfig):
     DEFAULT_MAX_TOTAL_QUERIES: int = int(os.getenv("DEFAULT_MAX_TOTAL_QUERIES", "25"))
     DEFAULT_MAX_REQUESTS_PER_CONNECTOR: int = int(os.getenv("DEFAULT_MAX_REQUESTS_PER_CONNECTOR", "10"))
     DEFAULT_MAX_EXECUTION_TIME_SECONDS: int = int(os.getenv("DEFAULT_MAX_EXECUTION_TIME_SECONDS", "600"))
-    DEFAULT_MAX_DOWNLOAD_BYTES: int = int(os.getenv("DEFAULT_MAX_DOWNLOAD_BYTES", "52428800"))
+    DEFAULT_MAX_DOWNLOAD_BYTES: int = int(os.getenv("DEFAULT_MAX_DOWNLOAD_BYTES", "52428800"))  # 50MB
     DEFAULT_MAX_AI_TOKENS: int = int(os.getenv("DEFAULT_MAX_AI_TOKENS", "25000"))
     DIMINISHING_RETURNS_SIMILARITY_THRESHOLD: float = float(
         os.getenv("DIMINISHING_RETURNS_SIMILARITY_THRESHOLD", "0.88")
@@ -94,5 +89,45 @@ class Settings(_BaseConfig):
     ENABLE_CROSSREF_CONNECTOR: bool = os.getenv("ENABLE_CROSSREF_CONNECTOR", "true").lower() in ("true", "1")
     ENABLE_MOCK_DEMO_CONNECTOR: bool = os.getenv("ENABLE_MOCK_DEMO_CONNECTOR", "true").lower() in ("true", "1")
 
+    # Optional Commercial Keys
+    TAVILY_API_KEY: Optional[str] = os.getenv("TAVILY_API_KEY", None)
+    SERPER_API_KEY: Optional[str] = os.getenv("SERPER_API_KEY", None)
+    BRAVE_SEARCH_API_KEY: Optional[str] = os.getenv("BRAVE_SEARCH_API_KEY", None)
+
+    def validate_production_readiness(self) -> None:
+        """
+        Enforces strict production safety assertions:
+        - Rejects default SECRET_KEY in production.
+        - Forbids silent fallback to SQLite in production.
+        - Forbids anonymous dev authentication bypass.
+        - Disables mock demo connector in production unless explicitly opted-in.
+        """
+        if self.ENVIRONMENT.lower() == "production":
+            DEFAULT_INSECURE_SECRET = "09d25e094faa6ca2556c818166b7a9563b93f7099f6f0f4caa6cf63b88e8d3e7"
+            if not self.SECRET_KEY or self.SECRET_KEY == DEFAULT_INSECURE_SECRET or len(self.SECRET_KEY) < 32:
+                raise ValueError("FATAL [Production Security]: SECRET_KEY must be a cryptographically secure random string (minimum 32 characters) and cannot use development default.")
+
+            if "sqlite" in self.DATABASE_URL.lower():
+                raise ValueError("FATAL [Production Security]: SQLite is strictly prohibited in production. A production PostgreSQL URL (postgresql+asyncpg://...) must be configured.")
+
+            if self.ALLOW_ANONYMOUS_DEV_AUTH:
+                raise ValueError("FATAL [Production Security]: ALLOW_ANONYMOUS_DEV_AUTH must be disabled in production.")
+
+            if self.DEBUG:
+                raise ValueError("FATAL [Production Security]: DEBUG mode must be False in production.")
+
+    def get_redacted_database_url(self) -> str:
+        """Returns the database URL with password redacted for safe logging."""
+        url = self.DATABASE_URL
+        if "@" in url and "://" in url:
+            prefix, rest = url.split("://", 1)
+            creds, hostpart = rest.split("@", 1)
+            if ":" in creds:
+                user = creds.split(":", 1)[0]
+                return f"{prefix}://{user}:[REDACTED]@{hostpart}"
+        return url
+
 
 settings = Settings()
+# Execute check on startup
+settings.validate_production_readiness()

@@ -15,7 +15,12 @@ class OSINTException(Exception):
 
 
 class SecurityException(OSINTException):
-    """Raised on security violation (e.g. SSRF, unauthorized resource access)."""
+    """Raised on security violation (e.g. invalid tokens, auth failures)."""
+    pass
+
+
+class AccessDeniedError(SecurityException):
+    """Raised when an authenticated user attempts to access another user's private resource."""
     pass
 
 

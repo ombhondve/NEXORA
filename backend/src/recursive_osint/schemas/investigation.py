@@ -4,7 +4,7 @@ Investigation schemas.
 
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class InvestigationCreate(BaseModel):
@@ -25,6 +25,8 @@ class InvestigationUpdate(BaseModel):
 
 
 class InvestigationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     user_id: str
     title: str
@@ -40,11 +42,10 @@ class InvestigationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class InvestigationEventResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     event_type: str
@@ -52,11 +53,10 @@ class InvestigationEventResponse(BaseModel):
     details_json: Dict[str, Any]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
-
 
 class QueryLogResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     query_text: str
     source_name: str
@@ -65,6 +65,3 @@ class QueryLogResponse(BaseModel):
     results_count: int
     execution_duration_ms: float
     created_at: datetime
-
-    class Config:
-        from_attributes = True

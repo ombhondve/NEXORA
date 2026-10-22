@@ -4,7 +4,7 @@ Direct Search and Lead schemas.
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class SearchRequest(BaseModel):
@@ -32,6 +32,8 @@ class SearchResponse(BaseModel):
 
 
 class DiscoveryLeadResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     investigation_id: str
     parent_lead_id: Optional[str] = None
@@ -42,6 +44,3 @@ class DiscoveryLeadResponse(BaseModel):
     status: str
     discovery_reason: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True

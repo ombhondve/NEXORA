@@ -6,7 +6,7 @@ Manages lifecycle of investigations, dispatching discovery runs, and query logs.
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recursive_osint.core.exceptions import EntityNotFoundError, SecurityException
+from recursive_osint.core.exceptions import EntityNotFoundError, SecurityException, AccessDeniedError
 from recursive_osint.db.models.investigation import Investigation, InvestigationEvent
 from recursive_osint.db.repositories.investigation_repo import InvestigationRepository
 from recursive_osint.discovery.controller import RecursiveDiscoveryEngine
@@ -47,7 +47,7 @@ class InvestigationService:
         if not inv:
             raise EntityNotFoundError(f"Investigation {investigation_id} not found.")
         if inv.user_id != user_id:
-            raise SecurityException("Unauthorized access to investigation.")
+            raise AccessDeniedError("Access to this investigation is restricted to its owner.")
         return inv
 
     async def list_user_investigations(self, user_id: str, skip: int = 0, limit: int = 50) -> List[Investigation]:

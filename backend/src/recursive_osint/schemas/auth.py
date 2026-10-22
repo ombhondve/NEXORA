@@ -4,7 +4,7 @@ Authentication request and response schemas.
 
 from typing import Optional
 import re
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 class UserCreate(BaseModel):
@@ -28,14 +28,13 @@ class UserLogin(BaseModel):
 
 
 class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     email: str
     full_name: Optional[str] = None
     role: str
     is_active: bool
-
-    class Config:
-        from_attributes = True
 
 
 class Token(BaseModel):
