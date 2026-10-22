@@ -204,4 +204,59 @@ class TestEnvironmentSeparation:
         assert s.HOST == "0.0.0.0"
         assert s.PORT == 9000
 
+    def test_greenlet_asyncio_support(self):
+        """Confirm greenlet is installed and sqlalchemy.ext.asyncio loads without error."""
+        import greenlet
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        assert greenlet.__version__ is not None
+        assert AsyncSession is not None
+        assert async_sessionmaker is not None
+
+
+class TestCORSPreflight:
+    def test_cors_preflight_options(self):
+        """Confirm CORS OPTIONS preflight returns 200 for allowed origin and Vercel domains."""
+        from fastapi.testclient import TestClient
+        from recursive_osint.main import app
+
+        client = TestClient(app)
+
+        # 1. Localhost allowed
+        res_local = client.options(
+            "/api/v1/search",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+        )
+        assert res_local.status_code == 200
+        assert res_local.headers.get("access-control-allow-origin") == "http://localhost:3000"
+        assert res_local.headers.get("access-control-allow-credentials") == "true"
+
+        # 2. Vercel deployment allowed via regex
+        res_vercel = client.options(
+            "/api/v1/search",
+            headers={
+                "Origin": "https://nexora-frontend.vercel.app",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+        )
+        assert res_vercel.status_code == 200
+        assert res_vercel.headers.get("access-control-allow-origin") == "https://nexora-frontend.vercel.app"
+
+        # 3. Unauthorized domain rejected with 400
+        res_unauthorized = client.options(
+            "/api/v1/search",
+            headers={
+                "Origin": "https://malicious-external-site.com",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+        )
+        assert res_unauthorized.status_code == 400
+
+
 
