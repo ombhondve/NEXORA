@@ -8,6 +8,7 @@ from recursive_osint.connectors.wikipedia import WikipediaConnector
 from recursive_osint.connectors.internet_archive import InternetArchiveConnector
 from recursive_osint.connectors.open_datasets import OpenDatasetsConnector
 from recursive_osint.connectors.mock_demo import MockDemoConnector
+from recursive_osint.connectors.searxng import SearXNGConnector, SearXNGProvider
 
 __all__ = [
     "BaseSourceConnector",
@@ -16,4 +17,6 @@ __all__ = [
     "InternetArchiveConnector",
     "OpenDatasetsConnector",
     "MockDemoConnector",
+    "SearXNGConnector",
+    "SearXNGProvider",
 ]

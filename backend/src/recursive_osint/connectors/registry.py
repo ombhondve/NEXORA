@@ -9,6 +9,7 @@ from recursive_osint.connectors.wikipedia import WikipediaConnector
 from recursive_osint.connectors.internet_archive import InternetArchiveConnector
 from recursive_osint.connectors.open_datasets import OpenDatasetsConnector
 from recursive_osint.connectors.mock_demo import MockDemoConnector
+from recursive_osint.connectors.searxng import SearXNGConnector
 from recursive_osint.core.logging import get_logger
 
 logger = get_logger("connectors.registry")
@@ -33,6 +34,9 @@ class ConnectorRegistry:
 
         if settings.ENABLE_MOCK_DEMO_CONNECTOR:
             self.register(MockDemoConnector())
+
+        if settings.ENABLE_SEARXNG_CONNECTOR:
+            self.register(SearXNGConnector())
 
     def register(self, connector: BaseSourceConnector) -> None:
         self._connectors[connector.name] = connector

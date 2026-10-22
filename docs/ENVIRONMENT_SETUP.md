@@ -222,6 +222,10 @@ Strict precedence:
 | `TAVILY_API_KEY` | No | **Secret** | Tavily search API key (optional). |
 | `SERPER_API_KEY` | No | **Secret** | Serper Google search API key (optional). |
 | `BRAVE_SEARCH_API_KEY` | No | **Secret** | Brave search API key (optional). |
+| `SEARXNG_URL` | No | Internal | SearXNG instance URL (Local dev: `http://localhost:8082`, remote instance in production). |
+| `ENABLE_SEARXNG_CONNECTOR` | No | Internal | Toggles SearXNG meta-search connector (default: `true`). |
+| `SEARXNG_TIMEOUT_SECONDS` | No | Internal | Timeout in seconds for SearXNG API requests (default: `10.0`). |
+| `SEARXNG_MAX_RESULTS` | No | Internal | Maximum search results retrieved per SearXNG query (default: `20`). |
 
 ---
 

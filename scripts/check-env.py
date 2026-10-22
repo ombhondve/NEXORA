@@ -28,6 +28,7 @@ def check_env():
         print(f"Neon Project ID: {settings.DATABASE_NEXORA_NEON_PROJECT_ID}")
     print(f"Redis Source:    {settings.REDIS_SOURCE}")
     print(f"Redis URL:       {settings.get_redacted_redis_url()}")
+    print(f"SearXNG URL:     {settings.SEARXNG_URL if settings.ENABLE_SEARXNG_CONNECTOR else 'DISABLED'}")
     print(f"SSRF Protection: {'ENABLED (Strict)' if settings.ENABLE_SSRF_PROTECTION else 'DISABLED'}")
     print(f"Storage Root:    {settings.STORAGE_LOCAL_ROOT}")
     print(f"Max Depth:       {settings.DEFAULT_MAX_DEPTH}")

@@ -281,6 +281,13 @@ class Settings(BaseModel):
     ENABLE_INTERNET_ARCHIVE_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_INTERNET_ARCHIVE_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_CROSSREF_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_CROSSREF_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_MOCK_DEMO_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_MOCK_DEMO_CONNECTOR", "true").lower() in ("true", "1"))
+    ENABLE_SEARXNG_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_SEARXNG_CONNECTOR", "true").lower() in ("true", "1"))
+
+    # SearXNG Meta-Search Engine (Local development: http://localhost:8082)
+    SEARXNG_URL: str = Field(default_factory=lambda: os.getenv("SEARXNG_URL", "http://localhost:8082").rstrip("/"))
+    SEARXNG_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("SEARXNG_TIMEOUT_SECONDS", "10.0")))
+    SEARXNG_MAX_RESULTS: int = Field(default_factory=lambda: int(os.getenv("SEARXNG_MAX_RESULTS", "20")))
+    SEARXNG_LANGUAGE: str = Field(default_factory=lambda: os.getenv("SEARXNG_LANGUAGE", "en"))
 
     # Optional Commercial Keys
     TAVILY_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("TAVILY_API_KEY", None))
