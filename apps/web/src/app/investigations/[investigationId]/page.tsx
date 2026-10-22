@@ -60,6 +60,7 @@ export default function InvestigationDetailPage({ params }: PageProps) {
   const [loading, setLoading] = useState(true);
   const [graphLoading, setGraphLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [isNotFound, setIsNotFound] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -68,6 +69,7 @@ export default function InvestigationDetailPage({ params }: PageProps) {
       return;
     }
     setLoadError(null);
+    setIsNotFound(false);
     try {
       // Load core investigation record first
       const inv = await api.getInvestigation(investigationId);
@@ -89,7 +91,12 @@ export default function InvestigationDetailPage({ params }: PageProps) {
       setGraph(grph);
     } catch (err: any) {
       console.error('Failed to load investigation details:', err);
-      setLoadError(err?.message || 'Failed to communicate with investigation database.');
+      const msg = err?.message || '';
+      if (msg.includes('not found') || msg.includes('404')) {
+        setIsNotFound(true);
+      } else {
+        setLoadError(msg || 'Failed to communicate with investigation database.');
+      }
     } finally {
       setLoading(false);
       setGraphLoading(false);
@@ -133,7 +140,7 @@ export default function InvestigationDetailPage({ params }: PageProps) {
     }
   };
 
-  if (loading && !investigation) {
+  if (loading && !investigation && !isNotFound && !loadError) {
     return (
       <div className="min-h-screen flex flex-col bg-cyber-bg">
         <Navbar />
@@ -144,6 +151,39 @@ export default function InvestigationDetailPage({ params }: PageProps) {
             <span className="text-xs text-slate-500 font-mono">
               Querying ID: {investigationId || 'pending'}
             </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isNotFound) {
+    return (
+      <div className="min-h-screen flex flex-col bg-cyber-bg">
+        <Navbar />
+        <div className="flex-1 flex items-center justify-center text-center p-6">
+          <div className="glass-panel max-w-md w-full p-8 rounded-xl border border-cyber-border space-y-4 font-mono">
+            <Compass className="w-10 h-10 text-slate-500 mx-auto" />
+            <h2 className="text-lg font-bold text-white">Investigation Not Found (404)</h2>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              No investigation record matches ID: <code className="text-cyber-cyan">{investigationId}</code>.
+              The investigation may have been deleted, or the identifier is incorrect.
+            </p>
+            <div className="pt-2 flex items-center justify-center space-x-3">
+              <button
+                onClick={loadData}
+                className="px-4 py-2 bg-cyber-card border border-cyber-border rounded-lg text-xs text-white hover:border-cyber-cyan transition-colors"
+              >
+                Retry
+              </button>
+              <Link
+                href="/dashboard"
+                className="inline-flex items-center space-x-1.5 px-4 py-2 rounded-lg text-xs bg-cyber-card border border-cyber-border text-cyber-cyan hover:underline"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>Return to Dashboard</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -205,6 +245,52 @@ export default function InvestigationDetailPage({ params }: PageProps) {
     );
   }
 
+  const renderStatusBadge = () => {
+    switch (investigation.status) {
+      case 'running':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/40">
+            <span className="w-2 h-2 rounded-full bg-cyber-cyan animate-ping"></span>
+            <span>DISCOVERY ACTIVE</span>
+          </div>
+        );
+      case 'completed':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-emerald-950/80 text-cyber-emerald border border-cyber-emerald/40">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>DISCOVERY FINALIZED</span>
+          </div>
+        );
+      case 'partial':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-amber-950/80 text-amber-300 border border-amber-500/40">
+            <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+            <span>PARTIAL FINDINGS</span>
+          </div>
+        );
+      case 'failed':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-rose-950/80 text-rose-300 border border-rose-600/40">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+            <span>DISCOVERY FAILED</span>
+          </div>
+        );
+      case 'cancelled':
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-slate-800 text-slate-300 border border-slate-700">
+            <span>CANCELLED</span>
+          </div>
+        );
+      default:
+        return (
+          <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-amber-950/80 text-cyber-amber border border-cyber-amber/40">
+            <Clock className="w-3.5 h-3.5" />
+            <span>QUEUED FOR DISCOVERY</span>
+          </div>
+        );
+    }
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-cyber-bg">
       <Navbar />
@@ -260,17 +346,7 @@ export default function InvestigationDetailPage({ params }: PageProps) {
 
             {/* Status indicator */}
             <div>
-              {investigation.status === 'running' ? (
-                <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/40">
-                  <span className="w-2 h-2 rounded-full bg-cyber-cyan animate-ping"></span>
-                  <span>DISCOVERY ACTIVE</span>
-                </div>
-              ) : (
-                <div className="flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-mono bg-emerald-950/80 text-cyber-emerald border border-cyber-emerald/40">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>DISCOVERY FINALIZED</span>
-                </div>
-              )}
+              {renderStatusBadge()}
             </div>
           </div>
 
@@ -282,7 +358,16 @@ export default function InvestigationDetailPage({ params }: PageProps) {
             </div>
             <div>
               <span className="text-slate-400">Termination Reason:</span>{' '}
-              <span className="text-cyber-cyan">{investigation.stop_reason || 'Autonomous expansion ongoing...'}</span>
+              <span className="text-cyber-cyan">
+                {investigation.stop_reason ||
+                  (investigation.status === 'completed'
+                    ? 'Lead discovery completed.'
+                    : investigation.status === 'partial'
+                    ? 'Partial findings retained.'
+                    : investigation.status === 'failed'
+                    ? 'Investigation failed.'
+                    : 'Autonomous expansion ongoing...')}
+              </span>
             </div>
           </div>
 

@@ -11,11 +11,19 @@ const nextConfig = {
     outputFileTracingRoot: path.join(__dirname, '../../'),
   },
   async rewrites() {
-    const backendTarget =
-      process.env.NEXT_PUBLIC_API_URL ||
-      (process.env.VERCEL || process.env.NODE_ENV === 'production'
-        ? 'https://nexora-backend.vercel.app'
-        : 'http://localhost:8000');
+    const rawTarget = process.env.NEXT_PUBLIC_API_URL?.trim();
+    const isProd = Boolean(process.env.VERCEL) || process.env.NODE_ENV === 'production';
+    let backendTarget = 'http://localhost:8000';
+
+    if (rawTarget) {
+      if (isProd && (rawTarget.includes('localhost') || rawTarget.includes('127.0.0.1'))) {
+        backendTarget = 'https://nexora-backend.vercel.app';
+      } else {
+        backendTarget = rawTarget;
+      }
+    } else if (isProd) {
+      backendTarget = 'https://nexora-backend.vercel.app';
+    }
 
     return [
       {

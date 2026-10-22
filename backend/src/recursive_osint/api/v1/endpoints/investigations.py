@@ -14,6 +14,8 @@ from recursive_osint.core.rate_limit import SlidingWindowRateLimiter
 from recursive_osint.db.session import get_db, AsyncSessionLocal
 from recursive_osint.db.models.user import User
 from recursive_osint.db.repositories.evidence_repo import EvidenceRepository
+from recursive_osint.core.logging import get_logger
+from recursive_osint.db.models.investigation import InvestigationEvent
 from recursive_osint.schemas.investigation import (
     InvestigationCreate,
     InvestigationResponse,
@@ -29,6 +31,7 @@ from recursive_osint.schemas.evidence import (
 from recursive_osint.services.investigation_service import InvestigationService
 from recursive_osint.services.report_service import ReportService
 
+logger = get_logger("api.investigations")
 router = APIRouter(prefix="/investigations", tags=["Investigations"])
 
 # Rate limiter for anonymous and public investigation creations
@@ -36,10 +39,31 @@ investigation_create_limiter = SlidingWindowRateLimiter(max_requests=30, window_
 
 
 async def run_discovery_background(investigation_id: str, user_id: Optional[str] = None):
-    """Executes discovery loop asynchronously."""
-    async with AsyncSessionLocal() as session:
-        service = InvestigationService(session)
-        await service.start_discovery(investigation_id, user_id)
+    """Executes discovery loop asynchronously with safe exception handling."""
+    try:
+        async with AsyncSessionLocal() as session:
+            service = InvestigationService(session)
+            await service.start_discovery(investigation_id, user_id)
+    except Exception as exc:
+        logger.error("Background discovery failed for investigation %s: %s", investigation_id, exc)
+        try:
+            async with AsyncSessionLocal() as session:
+                service = InvestigationService(session)
+                inv = await service.repo.get_by_id(investigation_id)
+                if inv and inv.status == "running":
+                    inv.status = "failed"
+                    inv.stop_reason = f"Execution error: {str(exc)}"
+                    await service.repo.add_event(
+                        InvestigationEvent(
+                            investigation_id=inv.id,
+                            event_type="investigation_failed",
+                            message=f"Investigation execution failed: {str(exc)}",
+                        )
+                    )
+                    await session.commit()
+        except Exception as inner_exc:
+            logger.error("Failed to mark investigation %s as failed: %s", investigation_id, inner_exc)
+
 
 
 @router.post("", response_model=InvestigationResponse, status_code=status.HTTP_201_CREATED)

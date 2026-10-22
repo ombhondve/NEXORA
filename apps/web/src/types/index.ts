@@ -1,12 +1,12 @@
 export type ClueType = 'text' | 'name' | 'domain' | 'url' | 'image' | 'pdf';
 
-export type InvestigationStatus = 'pending' | 'running' | 'completed' | 'cancelled' | 'failed';
+export type InvestigationStatus = 'pending' | 'queued' | 'running' | 'completed' | 'partial' | 'cancelled' | 'failed';
 
 export interface Investigation {
   id: string;
-  user_id: string;
+  user_id?: string | null;
   title: string;
-  description?: string;
+  description?: string | null;
   target_clue: string;
   clue_type: ClueType;
   status: InvestigationStatus;
@@ -14,7 +14,7 @@ export interface Investigation {
   current_depth: number;
   max_total_queries: number;
   progress_percent: number;
-  stop_reason?: string;
+  stop_reason?: string | null;
   created_at: string;
   updated_at: string;
 }

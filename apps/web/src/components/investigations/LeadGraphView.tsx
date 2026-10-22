@@ -58,9 +58,9 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
   }, [graph, activeNodeIds]);
 
   // Compute 2D node layout positions
-  const nodePositions = useMemo(() => {
+  const { nodePositions, canvasHeight } = useMemo(() => {
     const positions = new Map<string, { x: number; y: number }>();
-    if (!filteredNodes.length) return positions;
+    if (!filteredNodes.length) return { nodePositions: positions, canvasHeight: 520 };
 
     // Group by depth
     const depthGroups = new Map<number, GraphNode[]>();
@@ -72,10 +72,10 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
 
     const maxDepth = Math.max(1, ...Array.from(depthGroups.keys()));
     const canvasWidth = 840;
-    const canvasHeight = Math.max(480, (maxDepth + 1) * 140);
+    const computedHeight = Math.max(520, (maxDepth + 1) * 140);
 
     depthGroups.forEach((nodesInDepth, depth) => {
-      const y = 60 + (depth / (maxDepth + 0.5)) * (canvasHeight - 120);
+      const y = 60 + (depth / (maxDepth + 0.5)) * (computedHeight - 120);
       const count = nodesInDepth.length;
       nodesInDepth.forEach((node, index) => {
         const x = count === 1 ? canvasWidth / 2 : 80 + (index / (count - 1)) * (canvasWidth - 160);
@@ -83,7 +83,7 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
       });
     });
 
-    return positions;
+    return { nodePositions: positions, canvasHeight: computedHeight };
   }, [filteredNodes]);
 
   if (loading) {
@@ -119,7 +119,27 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
     );
   }
 
-  if (!graph || graph.is_empty || filteredNodes.length === 0) {
+  if (filteredNodes.length === 0 && (graph?.nodes?.length || 0) > 0) {
+    return (
+      <div className="glass-panel rounded-xl border border-cyber-border p-12 text-center space-y-4 font-mono">
+        <Filter className="w-8 h-8 mx-auto text-slate-500" />
+        <div className="space-y-1 max-w-md mx-auto">
+          <h4 className="text-sm font-bold text-white">No Items in Selected Filter</h4>
+          <p className="text-xs text-slate-400">
+            No graph nodes match filter category &quot;{filterType}&quot;.
+          </p>
+        </div>
+        <button
+          onClick={() => setFilterType('all')}
+          className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs bg-cyber-card border border-cyber-border text-cyber-cyan hover:underline"
+        >
+          <span>Reset Filter to All ({graph?.total_nodes || 0} nodes)</span>
+        </button>
+      </div>
+    );
+  }
+
+  if (!graph || graph.is_empty || !graph.nodes || (graph.nodes.length <= 1 && (graph.edges?.length || 0) === 0)) {
     return (
       <div className="glass-panel rounded-xl border border-cyber-border p-12 text-center space-y-4">
         <Network className="w-10 h-10 mx-auto text-slate-500 stroke-[1.5]" />
@@ -240,9 +260,9 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
             style={{ transform: `scale(${zoomLevel})`, transformOrigin: 'top center' }}
           >
             <svg
-              className="w-full h-[520px]"
-              viewBox="0 0 840 520"
-              style={{ minWidth: '760px' }}
+              className="w-full"
+              viewBox={`0 0 840 ${canvasHeight}`}
+              style={{ minWidth: '760px', height: `${canvasHeight}px` }}
             >
               <defs>
                 <marker

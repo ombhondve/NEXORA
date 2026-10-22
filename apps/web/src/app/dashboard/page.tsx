@@ -24,7 +24,7 @@ export default function DashboardPage() {
   const [investigations, setInvestigations] = useState<Investigation[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [filter, setFilter] = useState<'all' | 'running' | 'completed'>('all');
+  const [filter, setFilter] = useState<'all' | 'running' | 'completed' | 'partial' | 'failed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   const loadData = async () => {
@@ -45,16 +45,19 @@ export default function DashboardPage() {
     return () => clearInterval(interval);
   }, []);
 
+  const runningCount = investigations.filter((i) => i.status === 'running').length;
+  const completedCount = investigations.filter((i) => i.status === 'completed').length;
+  const partialCount = investigations.filter((i) => i.status === 'partial').length;
+  const failedCount = investigations.filter((i) => i.status === 'failed').length;
+  const queuedCount = investigations.filter((i) => i.status === 'pending' || i.status === 'queued').length;
+
   const filteredInvestigations = investigations.filter((inv) => {
     const matchesFilter = filter === 'all' ? true : inv.status === filter;
     const matchesSearch =
-      inv.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      inv.target_clue.toLowerCase().includes(searchQuery.toLowerCase());
+      (inv.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (inv.target_clue || '').toLowerCase().includes(searchQuery.toLowerCase());
     return matchesFilter && matchesSearch;
   });
-
-  const runningCount = investigations.filter((i) => i.status === 'running').length;
-  const completedCount = investigations.filter((i) => i.status === 'completed').length;
 
   return (
     <div className="min-h-screen flex flex-col bg-cyber-bg">
@@ -70,7 +73,9 @@ export default function DashboardPage() {
             </div>
             <div className="mt-2 flex items-baseline space-x-2">
               <span className="text-2xl font-bold font-mono text-white">{runningCount}</span>
-              <span className="text-xs text-cyber-cyan font-mono">running now</span>
+              <span className="text-xs text-cyber-cyan font-mono">
+                {queuedCount > 0 ? `${queuedCount} queued` : 'running now'}
+              </span>
             </div>
           </div>
 
@@ -87,23 +92,25 @@ export default function DashboardPage() {
 
           <div className="glass-panel rounded-xl p-5 border border-cyber-border/80">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-slate-400 uppercase">Total Operations</span>
-              <Compass className="w-4 h-4 text-slate-300" />
+              <span className="text-xs font-mono text-slate-400 uppercase">Partial / Failed</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
             </div>
             <div className="mt-2 flex items-baseline space-x-2">
-              <span className="text-2xl font-bold font-mono text-white">{investigations.length}</span>
-              <span className="text-xs text-slate-400 font-mono">records</span>
+              <span className="text-2xl font-bold font-mono text-white">{partialCount + failedCount}</span>
+              <span className="text-xs text-amber-300 font-mono">
+                {partialCount} partial, {failedCount} failed
+              </span>
             </div>
           </div>
 
           <div className="glass-panel rounded-xl p-5 border border-cyber-border/80">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-slate-400 uppercase">SSRF & Privacy</span>
-              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              <span className="text-xs font-mono text-slate-400 uppercase">Total Operations</span>
+              <Compass className="w-4 h-4 text-slate-300" />
             </div>
             <div className="mt-2 flex items-baseline space-x-2">
-              <span className="text-base font-bold font-mono text-emerald-400">ENFORCED</span>
-              <span className="text-[11px] text-slate-400 font-mono">pre-flight guard</span>
+              <span className="text-2xl font-bold font-mono text-white">{investigations.length}</span>
+              <span className="text-xs text-slate-400 font-mono">persisted records</span>
             </div>
           </div>
         </div>
@@ -122,7 +129,7 @@ export default function DashboardPage() {
           </div>
 
           <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
-            <div className="flex bg-cyber-card p-1 rounded-lg border border-cyber-border text-xs font-mono">
+            <div className="flex bg-cyber-card p-1 rounded-lg border border-cyber-border text-xs font-mono flex-wrap gap-1">
               <button
                 onClick={() => setFilter('all')}
                 className={`px-3 py-1 rounded transition-colors ${
@@ -147,6 +154,26 @@ export default function DashboardPage() {
               >
                 Completed ({completedCount})
               </button>
+              {partialCount > 0 && (
+                <button
+                  onClick={() => setFilter('partial')}
+                  className={`px-3 py-1 rounded transition-colors ${
+                    filter === 'partial' ? 'bg-cyber-bg text-amber-300 border border-amber-400/40' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Partial ({partialCount})
+                </button>
+              )}
+              {failedCount > 0 && (
+                <button
+                  onClick={() => setFilter('failed')}
+                  className={`px-3 py-1 rounded transition-colors ${
+                    filter === 'failed' ? 'bg-cyber-bg text-rose-300 border border-rose-500/40' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Failed ({failedCount})
+                </button>
+              )}
             </div>
 
             <button

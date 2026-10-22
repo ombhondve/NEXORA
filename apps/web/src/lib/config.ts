@@ -10,27 +10,22 @@ export interface FrontendConfig {
 }
 
 function sanitizeApiUrl(rawUrl: string | undefined): string {
-  if (rawUrl && rawUrl.trim()) {
-    const trimmed = rawUrl.trim();
-    if (
-      typeof window !== 'undefined' &&
+  const isProduction =
+    Boolean(process.env.VERCEL) ||
+    process.env.NODE_ENV === 'production' ||
+    (typeof window !== 'undefined' &&
       window.location.hostname !== 'localhost' &&
-      window.location.hostname !== '127.0.0.1'
-    ) {
-      if (trimmed.includes('localhost') || trimmed.includes('127.0.0.1')) {
-        return 'https://nexora-backend.vercel.app';
-      }
-    }
-    return trimmed.replace(/\/+$/, '');
-  }
+      window.location.hostname !== '127.0.0.1');
 
-  if (typeof window !== 'undefined') {
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+  if (rawUrl && rawUrl.trim()) {
+    const trimmed = rawUrl.trim().replace(/\/+$/, '');
+    if (isProduction && (trimmed.includes('localhost') || trimmed.includes('127.0.0.1'))) {
       return 'https://nexora-backend.vercel.app';
     }
+    return trimmed;
   }
 
-  if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
+  if (isProduction) {
     return 'https://nexora-backend.vercel.app';
   }
 

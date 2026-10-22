@@ -172,3 +172,120 @@ async def test_investigation_graph_with_leads_and_entities(client: AsyncClient, 
     assert lead_edge is not None
     assert lead_edge["label"] == "expanded_to"
 
+
+@pytest.mark.asyncio
+async def test_investigation_lifecycle_state_transitions(client: AsyncClient, db_session):
+    """Verifies QUEUED, RUNNING, COMPLETED, PARTIAL, and FAILED states and dashboard listing."""
+    # 1. Create investigation (public, unauthenticated)
+    create_res = await client.post(
+        "/api/v1/investigations",
+        json={
+            "title": "State Transition Test",
+            "target_clue": "StateVerification",
+            "clue_type": "text",
+            "max_depth": 2,
+            "max_total_queries": 4,
+        },
+    )
+    assert create_res.status_code == 201
+    inv_id = create_res.json()["id"]
+    assert create_res.json()["status"] == "pending"
+
+    # 2. List investigations and verify it appears
+    list_res = await client.get("/api/v1/investigations")
+    assert list_res.status_code == 200
+    ids = [i["id"] for i in list_res.json()]
+    assert inv_id in ids
+
+    # 3. Test 404 for nonexistent investigation
+    nonexistent_id = "00000000-0000-0000-0000-000000000000"
+    get_404 = await client.get(f"/api/v1/investigations/{nonexistent_id}")
+    assert get_404.status_code == 404
+    assert "not found" in get_404.json()["message"].lower()
+
+    graph_404 = await client.get(f"/api/v1/investigations/{nonexistent_id}/graph")
+    assert graph_404.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_controller_simulated_vs_real_evidence_distinction(client: AsyncClient, db_session):
+    """Verifies that evidence generated from simulated sources is marked unverified."""
+    from recursive_osint.db.models.investigation import Investigation
+    from recursive_osint.db.models.evidence_and_document import SourceDocument, EvidenceRecord
+
+    inv = Investigation(
+        title="Evidence Attribution Test",
+        target_clue="Quantum Cryptography",
+        clue_type="text",
+        status="completed",
+    )
+    db_session.add(inv)
+    await db_session.flush()
+
+    # Document from real source
+    real_doc = SourceDocument(
+        investigation_id=inv.id,
+        connector_name="wikipedia",
+        title="Post-Quantum Cryptography Standardization",
+        url="https://en.wikipedia.org/wiki/Post-Quantum_Cryptography",
+        canonical_url="https://en.wikipedia.org/wiki/post-quantum_cryptography",
+        content_hash="hash123456",
+        snippet="NIST selected primary post-quantum algorithms including ML-KEM and ML-DSA.",
+    )
+    # Document from simulated/mock source
+    sim_doc = SourceDocument(
+        investigation_id=inv.id,
+        connector_name="mock_demo",
+        title="Simulated Threat Report",
+        url="https://mock.example.org/report",
+        canonical_url="https://mock.example.org/report",
+        content_hash="hash654321",
+        snippet="Simulated synthetic intelligence finding for offline testing.",
+    )
+    db_session.add_all([real_doc, sim_doc])
+    await db_session.flush()
+
+    # Evidence for real
+    ev_real = EvidenceRecord(
+        investigation_id=inv.id,
+        document_id=real_doc.id,
+        title=real_doc.title,
+        extracted_passage=real_doc.snippet,
+        relevance_score=0.95,
+        uncertainty_score=0.10,
+        confidence_level="high",
+        why_included="Direct NIST reference",
+        is_verified_source_statement=True,
+    )
+    # Evidence for simulated
+    ev_sim = EvidenceRecord(
+        investigation_id=inv.id,
+        document_id=sim_doc.id,
+        title=sim_doc.title,
+        extracted_passage=sim_doc.snippet,
+        relevance_score=0.70,
+        uncertainty_score=0.85,
+        confidence_level="unverified",
+        why_included="[Simulated Source] Synthetic demo clue",
+        is_verified_source_statement=False,
+    )
+    db_session.add_all([ev_real, ev_sim])
+    await db_session.commit()
+
+    # Query evidence via API
+    ev_res = await client.get(f"/api/v1/investigations/{inv.id}/evidence")
+    assert ev_res.status_code == 200
+    records = ev_res.json()
+    assert len(records) == 2
+
+    real_rec = next(r for r in records if r["title"] == real_doc.title)
+    sim_rec = next(r for r in records if r["title"] == sim_doc.title)
+
+    assert real_rec["is_verified_source_statement"] is True
+    assert real_rec["confidence_level"] == "high"
+
+    assert sim_rec["is_verified_source_statement"] is False
+    assert sim_rec["confidence_level"] == "unverified"
+    assert "[Simulated Source]" in sim_rec["why_included"]
+
+

@@ -84,6 +84,11 @@ class RecursiveDiscoveryEngine:
 
         stop_reason = ""
         seen_canonical_urls: set[str] = set()
+        successful_queries = 0
+        failed_queries = 0
+        total_results_found = 0
+        providers_succeeded: set[str] = set()
+        providers_failed: set[str] = set()
 
         while not self.queue.is_empty():
             # Check stopping conditions
@@ -143,6 +148,9 @@ class RecursiveDiscoveryEngine:
                         query_log.status = "completed"
                         query_log.results_count = len(search_results)
                         query_log.execution_duration_ms = duration_ms
+                        successful_queries += 1
+                        providers_succeeded.add(connector.name)
+                        total_results_found += len(search_results)
 
                         if search_results:
                             lead_discovered_any_results = True
@@ -183,15 +191,17 @@ class RecursiveDiscoveryEngine:
                                 source_name=connector.display_name,
                             )
 
+                            is_simulated = getattr(connector, "is_simulated", False)
                             evidence = EvidenceRecord(
                                 investigation_id=self.investigation.id,
                                 document_id=doc.id,
                                 title=item.title,
                                 extracted_passage=item.snippet,
                                 relevance_score=relevance,
-                                uncertainty_score=uncertainty,
-                                confidence_level=conf,
-                                why_included=why,
+                                uncertainty_score=0.85 if is_simulated else uncertainty,
+                                confidence_level="unverified" if is_simulated else conf,
+                                why_included=f"[Simulated Source] {why}" if is_simulated else why,
+                                is_verified_source_statement=not is_simulated,
                             )
                             self.session.add(evidence)
 
@@ -248,7 +258,14 @@ class RecursiveDiscoveryEngine:
                         logger.error("Query failed for connector %s: %s", connector.name, str(exc))
                         query_log.status = "failed"
                         query_log.error_message = str(exc)
+                        failed_queries += 1
+                        providers_failed.add(connector.name)
                         await self.session.flush()
+                        await self.emit_event(
+                            "query_failed",
+                            f"Query to {connector.display_name} for '{query_text}' failed: {str(exc)}",
+                            {"source": connector.name, "error": str(exc), "depth": current_depth},
+                        )
 
             if lead_discovered_any_results:
                 self.consecutive_zero_results = 0
@@ -260,17 +277,33 @@ class RecursiveDiscoveryEngine:
             self.investigation.progress_percent = min(100, max(self.investigation.progress_percent, progress))
             await self.session.commit()
 
-        # Finalize investigation
-        if not stop_reason:
-            stop_reason = "Lead discovery completed within allotted budget."
+        # Finalize investigation with truthful status and stop reason
+        total_queries = successful_queries + failed_queries
+        if self.is_cancelled:
+            self.investigation.status = "cancelled"
+            self.investigation.stop_reason = "Cancelled by user request."
+            await self.emit_event("investigation_cancelled", "Investigation cancelled by user request.")
+        elif total_queries > 0 and successful_queries == 0:
+            self.investigation.status = "failed"
+            self.investigation.stop_reason = stop_reason or f"All {failed_queries} queries failed across active search connectors."
+            await self.emit_event("investigation_failed", f"Investigation failed. Stop reason: {self.investigation.stop_reason}")
+        elif failed_queries > 0 and successful_queries > 0:
+            self.investigation.status = "partial"
+            self.investigation.stop_reason = stop_reason or f"Completed with partial source coverage ({len(providers_succeeded)} connectors active, {len(providers_failed)} failed)."
+            self.investigation.progress_percent = min(100, max(self.investigation.progress_percent, int((self.budget.queries_executed / self.budget.max_total_queries) * 100)))
+            await self.emit_event("investigation_partial", f"Investigation finalized with partial coverage. Stop reason: {self.investigation.stop_reason}")
+        else:
+            self.investigation.status = "completed"
+            if total_results_found == 0:
+                self.investigation.stop_reason = stop_reason or "Lead discovery completed; zero findings discovered across active sources."
+            else:
+                self.investigation.stop_reason = stop_reason or "Lead discovery completed within allotted budget."
+            self.investigation.progress_percent = 100
+            await self.emit_event("investigation_completed", f"Investigation finalized. Stop reason: {self.investigation.stop_reason}")
 
-        self.investigation.status = "completed" if not self.is_cancelled else "cancelled"
-        self.investigation.stop_reason = stop_reason
-        self.investigation.progress_percent = 100
-        await self.emit_event("investigation_completed", f"Investigation finalized. Stop reason: {stop_reason}")
         await self.session.commit()
 
-        logger.info("Investigation %s finished with reason: %s", self.investigation.id, stop_reason)
+        logger.info("Investigation %s finished with status '%s', reason: %s", self.investigation.id, self.investigation.status, self.investigation.stop_reason)
         return self.investigation
 
     def cancel(self) -> None:
