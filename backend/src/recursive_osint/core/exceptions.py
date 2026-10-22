@@ -52,3 +52,9 @@ class EntityNotFoundError(OSINTException):
 class ValidationError(OSINTException):
     """Raised on input or domain validation failures."""
     pass
+
+
+class StorageError(OSINTException):
+    """Raised on storage backend failure or invalid configuration."""
+    pass
+

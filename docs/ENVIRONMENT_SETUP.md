@@ -214,8 +214,14 @@ Strict precedence:
 | Variable | Required | Sensitivity | Description |
 | :--- | :---: | :---: | :--- |
 | `OPENSEARCH_URL` | No | Internal | OpenSearch cluster URL (default: `http://localhost:9200`). |
-| `STORAGE_BACKEND` | No | Internal | Storage provider (`local` or `s3`). |
-| `STORAGE_LOCAL_ROOT` | No | Internal | Upload directory (default: `./storage/uploads`). |
+| `STORAGE_BACKEND` | No | Internal | Storage provider: `local` (default) or `s3`. |
+| `STORAGE_LOCAL_ROOT` | No | Internal | Upload directory (default: `./storage/uploads`, automatically uses `/tmp/storage/uploads` in serverless). |
+| `S3_BUCKET_NAME` | Conditional | Internal | S3 bucket name (required if `STORAGE_BACKEND="s3"`). |
+| `S3_REGION` | No | Internal | AWS / S3 region (default: `us-east-1`). |
+| `S3_ENDPOINT_URL` | No | Internal | S3 custom endpoint (e.g. Cloudflare R2, MinIO). |
+| `S3_ACCESS_KEY_ID` | Conditional | **Secret** | S3 access key ID (required if `STORAGE_BACKEND="s3"`). |
+| `S3_SECRET_ACCESS_KEY` | Conditional | **Secret** | S3 secret access key (required if `STORAGE_BACKEND="s3"`). |
+
 | `ENABLE_SSRF_PROTECTION` | No | Security | Blocks local/private IP addresses from recursive crawling (default: `true`). |
 | `AI_PROVIDER` | No | Public | LLM synthesis provider: `none`, `openai`, `anthropic`, `ollama`. |
 | `AI_API_KEY` | No | **Secret** | API key for configured AI provider. |

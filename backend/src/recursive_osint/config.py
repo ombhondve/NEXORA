@@ -77,6 +77,16 @@ def normalize_database_url(url: str, is_async: bool = True) -> str:
         return cleaned
 
 
+def is_serverless_environment() -> bool:
+    """Detects if running inside Vercel, AWS Lambda, or a serverless container."""
+    return bool(
+        os.getenv("VERCEL")
+        or os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+        or os.getenv("VERCEL_ENV")
+        or os.getenv("LAMBDA_TASK_ROOT")
+    )
+
+
 def resolve_active_database_url() -> tuple[str, str]:
     """
     Resolves the active database connection string based on strict precedence:
@@ -104,9 +114,12 @@ def resolve_active_database_url() -> tuple[str, str]:
 
     # 4. Default SQLite for non-production environments only
     if env_name != "production":
+        if is_serverless_environment():
+            return "sqlite+aiosqlite:////tmp/osint_dev.db", "default_sqlite_serverless"
         return "sqlite+aiosqlite:///./osint_dev.db", "default_sqlite"
 
     return "", "none"
+
 
 
 def resolve_active_redis_url() -> tuple[str, str]:
@@ -125,6 +138,26 @@ def resolve_active_redis_url() -> tuple[str, str]:
         return val.strip(), "REDIS_URL"
 
     return "redis://localhost:6379/0", "default_redis"
+
+
+def resolve_storage_local_root() -> str:
+    """
+    Resolves the storage root directory.
+    In serverless environments (Vercel, AWS Lambda), filesystems outside /tmp are read-only.
+    If running serverless and STORAGE_LOCAL_ROOT is not set or points to a relative/non-tmp path,
+    defaults safely to '/tmp/storage/uploads'.
+    In standard persistent environments, defaults to './storage/uploads'.
+    """
+    env_val = os.getenv("STORAGE_LOCAL_ROOT")
+    if env_val and env_val.strip():
+        cleaned = env_val.strip()
+        if is_serverless_environment() and not (cleaned.startswith("/tmp") or cleaned.startswith("\\tmp")):
+            return "/tmp/storage/uploads"
+        return cleaned
+
+    if is_serverless_environment():
+        return "/tmp/storage/uploads"
+    return "./storage/uploads"
 
 
 class Settings(BaseModel):
@@ -248,10 +281,22 @@ class Settings(BaseModel):
     OPENSEARCH_INDEX_PREFIX: str = Field(default_factory=lambda: os.getenv("OPENSEARCH_INDEX_PREFIX", "osint"))
 
     # Storage (Private uploads)
-    STORAGE_BACKEND: str = Field(default_factory=lambda: os.getenv("STORAGE_BACKEND", "local"))
-    STORAGE_LOCAL_ROOT: str = Field(default_factory=lambda: os.getenv("STORAGE_LOCAL_ROOT", "./storage/uploads"))
+    STORAGE_BACKEND: str = Field(default_factory=lambda: os.getenv("STORAGE_BACKEND", "local").strip().lower())
+    STORAGE_LOCAL_ROOT: str = Field(default_factory=resolve_storage_local_root)
     STORAGE_MAX_FILE_SIZE_MB: int = Field(default_factory=lambda: int(os.getenv("STORAGE_MAX_FILE_SIZE_MB", "25")))
     ALLOWED_UPLOAD_EXTENSIONS: str = Field(default_factory=lambda: os.getenv("ALLOWED_UPLOAD_EXTENSIONS", "pdf,txt,png,jpg,jpeg,webp"))
+
+    # S3 / External Object Storage (For persistent uploads across serverless container invocations)
+    S3_BUCKET_NAME: Optional[str] = Field(default_factory=lambda: os.getenv("S3_BUCKET_NAME") or os.getenv("AWS_S3_BUCKET"))
+    S3_REGION: str = Field(default_factory=lambda: os.getenv("S3_REGION") or os.getenv("AWS_REGION", "us-east-1"))
+    S3_ENDPOINT_URL: Optional[str] = Field(default_factory=lambda: os.getenv("S3_ENDPOINT_URL"))
+    S3_ACCESS_KEY_ID: Optional[str] = Field(default_factory=lambda: os.getenv("S3_ACCESS_KEY_ID") or os.getenv("AWS_ACCESS_KEY_ID"))
+    S3_SECRET_ACCESS_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("S3_SECRET_ACCESS_KEY") or os.getenv("AWS_SECRET_ACCESS_KEY"))
+
+    @property
+    def is_serverless(self) -> bool:
+        return is_serverless_environment()
+
 
     @property
     def allowed_extensions_set(self) -> Set[str]:

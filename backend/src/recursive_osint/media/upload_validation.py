@@ -9,7 +9,8 @@ import uuid
 from pathlib import Path
 from typing import Tuple, Optional
 from recursive_osint.config import settings
-from recursive_osint.core.exceptions import ValidationError, SecurityException
+from recursive_osint.core.exceptions import ValidationError, SecurityException, StorageError
+
 
 # Known magic signatures for permitted file formats
 MAGIC_SIGNATURES = {
@@ -75,13 +76,60 @@ def validate_file_content(content: bytes, filename: str) -> Tuple[str, str]:
 
 
 def save_upload_securely(content: bytes, filename: str) -> str:
-    """Validates and persists file into the private storage directory."""
+    """
+    Validates and persists file into the configured storage backend (local, tmp, or S3).
+    Returns the resolved storage location (filesystem path or object URI).
+    """
     ext, safe_name = validate_file_content(content, filename)
+
+    # 1. External S3 / Object Storage Backend
+    if settings.STORAGE_BACKEND == "s3":
+        if not settings.S3_BUCKET_NAME:
+            raise StorageError(
+                "STORAGE_BACKEND is configured as 's3' but S3_BUCKET_NAME is not set. "
+                "Configure S3_BUCKET_NAME, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY in the environment."
+            )
+        try:
+            import boto3
+
+            s3_client_kwargs = {
+                "region_name": settings.S3_REGION,
+            }
+            if settings.S3_ENDPOINT_URL:
+                s3_client_kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
+            if settings.S3_ACCESS_KEY_ID and settings.S3_SECRET_ACCESS_KEY:
+                s3_client_kwargs["aws_access_key_id"] = settings.S3_ACCESS_KEY_ID
+                s3_client_kwargs["aws_secret_access_key"] = settings.S3_SECRET_ACCESS_KEY
+
+            s3_client = boto3.client("s3", **s3_client_kwargs)
+            s3_key = f"uploads/{safe_name}"
+            s3_client.put_object(
+                Bucket=settings.S3_BUCKET_NAME,
+                Key=s3_key,
+                Body=content,
+            )
+            return f"s3://{settings.S3_BUCKET_NAME}/{s3_key}"
+        except ImportError:
+            raise StorageError(
+                "STORAGE_BACKEND is set to 's3' but boto3 is not installed. "
+                "Add boto3 to dependencies to enable S3 object storage."
+            )
+        except Exception as exc:
+            raise StorageError(f"Failed to persist file to S3: {exc}")
+
+    # 2. Local / Temporary Filesystem Backend
     target_dir = Path(settings.STORAGE_LOCAL_ROOT)
-    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        target_dir.mkdir(parents=True, exist_ok=True)
+    except (OSError, PermissionError):
+        # Fallback to temp directory on read-only serverless filesystems
+        import tempfile
+        target_dir = Path(tempfile.gettempdir()) / "storage" / "uploads"
+        target_dir.mkdir(parents=True, exist_ok=True)
 
     dest_path = target_dir / safe_name
     with open(dest_path, "wb") as f:
         f.write(content)
 
     return str(dest_path.resolve())
+

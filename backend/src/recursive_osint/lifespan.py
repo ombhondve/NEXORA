@@ -25,9 +25,31 @@ async def lifespan(app: FastAPI):
     # Validate production readiness assertions
     settings.validate_production_readiness()
 
-    # Ensure storage upload directory exists
-    upload_dir = Path(settings.STORAGE_LOCAL_ROOT)
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure storage upload directory exists safely without crashing read-only serverless filesystems
+    try:
+        upload_dir = Path(settings.STORAGE_LOCAL_ROOT)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        logger.info("Storage directory initialized at: %s", upload_dir.resolve())
+    except (OSError, PermissionError) as exc:
+        logger.warning(
+            "Could not create configured storage directory '%s': %s. "
+            "Attempting fallback to temporary directory.",
+            settings.STORAGE_LOCAL_ROOT,
+            exc,
+        )
+        try:
+            import tempfile
+            fallback_dir = Path(tempfile.gettempdir()) / "storage" / "uploads"
+            fallback_dir.mkdir(parents=True, exist_ok=True)
+            settings.STORAGE_LOCAL_ROOT = str(fallback_dir)
+            logger.info("Fell back to temporary storage directory at: %s", fallback_dir.resolve())
+        except (OSError, PermissionError) as fallback_exc:
+            logger.warning(
+                "Could not create fallback temporary storage directory: %s. "
+                "Application startup will proceed, but local file uploads will fail until writable storage is configured.",
+                fallback_exc,
+            )
+
 
     # Initialize tables if in development
     if "sqlite" in settings.DATABASE_URL:
