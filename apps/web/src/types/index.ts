@@ -87,6 +87,8 @@ export interface SourceConnectorStatus {
   coverage_info: string;
   requires_api_key: boolean;
   is_configured: boolean;
+  health_status?: 'online' | 'offline' | 'simulated' | 'unconfigured';
+  is_simulated?: boolean;
 }
 
 export interface InvestigationReport {

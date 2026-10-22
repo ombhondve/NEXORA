@@ -32,6 +32,13 @@ class MockDemoConnector(BaseSourceConnector):
     def is_configured(self) -> bool:
         return True
 
+    @property
+    def is_simulated(self) -> bool:
+        return True
+
+    async def check_health(self) -> tuple[bool, str]:
+        return True, "simulated"
+
     async def search(
         self, query: str, max_results: int = 10, **kwargs: Any
     ) -> List[SearchResultItem]:

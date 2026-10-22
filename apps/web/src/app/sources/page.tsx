@@ -64,7 +64,17 @@ export default function SourcesPage() {
                   </div>
                 </div>
 
-                {src.is_configured ? (
+                {src.is_simulated || src.health_status === 'simulated' ? (
+                  <span className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-mono bg-purple-950 text-purple-300 border border-purple-800">
+                    <Shield className="w-3.5 h-3.5 text-purple-400" />
+                    <span>SIMULATED</span>
+                  </span>
+                ) : src.health_status === 'offline' ? (
+                  <span className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-mono bg-rose-950 text-rose-300 border border-rose-800">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-400" />
+                    <span>OFFLINE</span>
+                  </span>
+                ) : src.is_configured ? (
                   <span className="flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-mono bg-emerald-950 text-emerald-300 border border-emerald-800">
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                     <span>ONLINE</span>

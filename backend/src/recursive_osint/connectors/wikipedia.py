@@ -36,6 +36,19 @@ class WikipediaConnector(BaseSourceConnector):
     def is_configured(self) -> bool:
         return True
 
+    async def check_health(self) -> tuple[bool, str]:
+        if not self.is_configured:
+            return False, "unconfigured"
+        try:
+            res = await self._safe_http_get(
+                self.endpoint,
+                params={"action": "query", "meta": "siteinfo", "format": "json"},
+                timeout=4.0,
+            )
+            return (True, "online") if res.status_code == 200 else (False, "offline")
+        except Exception:
+            return False, "offline"
+
     async def search(
         self, query: str, max_results: int = 10, **kwargs: Any
     ) -> List[SearchResultItem]:

@@ -10,6 +10,9 @@ from recursive_osint.connectors.internet_archive import InternetArchiveConnector
 from recursive_osint.connectors.open_datasets import OpenDatasetsConnector
 from recursive_osint.connectors.mock_demo import MockDemoConnector
 from recursive_osint.connectors.searxng import SearXNGConnector
+from recursive_osint.connectors.openalex import OpenAlexConnector
+from recursive_osint.connectors.wikidata import WikidataConnector
+from recursive_osint.connectors.github_public import GitHubPublicConnector
 from recursive_osint.core.logging import get_logger
 
 logger = get_logger("connectors.registry")
@@ -31,6 +34,15 @@ class ConnectorRegistry:
 
         if settings.ENABLE_CROSSREF_CONNECTOR:
             self.register(OpenDatasetsConnector())
+
+        if settings.ENABLE_OPENALEX_CONNECTOR:
+            self.register(OpenAlexConnector())
+
+        if settings.ENABLE_WIKIDATA_CONNECTOR:
+            self.register(WikidataConnector())
+
+        if settings.ENABLE_GITHUB_CONNECTOR:
+            self.register(GitHubPublicConnector())
 
         if settings.ENABLE_MOCK_DEMO_CONNECTOR:
             self.register(MockDemoConnector())

@@ -65,6 +65,24 @@ class TestDatabaseConfiguration:
         assert "ssl=require" in normalized
         assert "sslmode" not in normalized
 
+    def test_url_normalization_channel_binding_and_gssencmode_stripped(self):
+        """
+        Verify that libpq parameters unsupported by asyncpg (channel_binding, gssencmode, target_session_attrs)
+        are cleanly stripped from the normalized database URL to prevent
+        TypeError: connect() got an unexpected keyword argument 'channel_binding'.
+        """
+        raw = (
+            "postgresql://neondb_owner:npg_secret@ep-xyz.us-east-1.aws.neon.tech/neondb"
+            "?sslmode=require&channel_binding=prefer&gssencmode=disable&target_session_attrs=read-write"
+        )
+        normalized = normalize_database_url(raw, is_async=True)
+        assert normalized.startswith("postgresql+asyncpg://")
+        assert "ssl=require" in normalized
+        assert "channel_binding" not in normalized
+        assert "gssencmode" not in normalized
+        assert "target_session_attrs" not in normalized
+        assert "sslmode" not in normalized
+
     def test_sync_migration_url_normalization(self):
         """Verify sync migration URL normalization maps to postgresql:// without asyncpg."""
         raw = "postgresql+asyncpg://neondb_owner:secret@ep-xyz.us-east-1.aws.neon.tech/neondb"
@@ -246,6 +264,18 @@ class TestCORSPreflight:
         )
         assert res_vercel.status_code == 200
         assert res_vercel.headers.get("access-control-allow-origin") == "https://nexora-frontend.vercel.app"
+
+        # 3. Specifically verify deployed frontend origin
+        res_deployed = client.options(
+            "/api/v1/search",
+            headers={
+                "Origin": "https://nexora-apps-five.vercel.app",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,authorization",
+            },
+        )
+        assert res_deployed.status_code == 200
+        assert res_deployed.headers.get("access-control-allow-origin") == "https://nexora-apps-five.vercel.app"
 
         # 3. Unauthorized domain rejected with 400
         res_unauthorized = client.options(

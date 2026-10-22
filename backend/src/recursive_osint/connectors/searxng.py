@@ -237,6 +237,12 @@ class SearXNGConnector(BaseSourceConnector):
                 return False
         return True
 
+    async def check_health(self) -> tuple[bool, str]:
+        if not self.is_configured:
+            return False, "unconfigured"
+        is_healthy = await self.provider.check_health()
+        return is_healthy, "online" if is_healthy else "offline"
+
     async def search(
         self, query: str, max_results: int = 10, **kwargs: Any
     ) -> List[SearchResultItem]:

@@ -62,6 +62,14 @@ def normalize_database_url(url: str, is_async: bool = True) -> str:
 
         if "asyncpg" in parsed.drivername:
             query = dict(parsed.query)
+            # Remove libpq-specific parameters unsupported by asyncpg
+            for unsupported in (
+                "channel_binding",
+                "gssencmode",
+                "target_session_attrs",
+            ):
+                query.pop(unsupported, None)
+
             sslmode = query.pop("sslmode", None)
             if sslmode and "ssl" not in query:
                 if sslmode in ("require", "prefer", "verify-ca", "verify-full"):
@@ -74,6 +82,12 @@ def normalize_database_url(url: str, is_async: bool = True) -> str:
     except Exception:
         if is_async and cleaned.startswith("postgresql://") and "+asyncpg" not in cleaned:
             cleaned = "postgresql+asyncpg://" + cleaned[len("postgresql://"):]
+        # Strip libpq parameters from fallback query string
+        for param in ("channel_binding=", "gssencmode=", "target_session_attrs="):
+            if param in cleaned:
+                cleaned = re.sub(rf"[&?]{param}[^&]*", "", cleaned)
+                if "?" not in cleaned and "&" in cleaned:
+                    cleaned = cleaned.replace("&", "?", 1)
         return cleaned
 
 
@@ -185,7 +199,12 @@ class Settings(BaseModel):
 
 
     # CORS
-    CORS_ORIGINS: str = Field(default_factory=lambda: os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"))
+    CORS_ORIGINS: str = Field(
+        default_factory=lambda: os.getenv(
+            "CORS_ORIGINS",
+            "http://localhost:3000,http://127.0.0.1:3000,https://nexora-apps-five.vercel.app",
+        )
+    )
     CORS_ORIGIN_REGEX: Optional[str] = Field(
         default_factory=lambda: os.getenv("CORS_ORIGIN_REGEX", r"^https:\/\/.*\.vercel\.app$")
     )
@@ -227,7 +246,12 @@ class Settings(BaseModel):
     DATABASE_POOL_SIZE: int = Field(default_factory=lambda: int(os.getenv("DATABASE_POOL_SIZE", "5")))
     DATABASE_MAX_OVERFLOW: int = Field(default_factory=lambda: int(os.getenv("DATABASE_MAX_OVERFLOW", "10")))
     DATABASE_POOL_TIMEOUT: int = Field(default_factory=lambda: int(os.getenv("DATABASE_POOL_TIMEOUT", "30")))
-    DATABASE_USE_NULLPOOL: bool = Field(default_factory=lambda: os.getenv("DATABASE_USE_NULLPOOL", "false").lower() in ("true", "1"))
+    DATABASE_USE_NULLPOOL: bool = Field(
+        default_factory=lambda: os.getenv(
+            "DATABASE_USE_NULLPOOL",
+            "true" if is_serverless_environment() else "false",
+        ).lower() in ("true", "1")
+    )
 
     @property
     def DATABASE_MIGRATION_SOURCE(self) -> str:
@@ -332,6 +356,12 @@ class Settings(BaseModel):
     ENABLE_CROSSREF_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_CROSSREF_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_MOCK_DEMO_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_MOCK_DEMO_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_SEARXNG_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_SEARXNG_CONNECTOR", "true").lower() in ("true", "1"))
+    ENABLE_OPENALEX_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_OPENALEX_CONNECTOR", "true").lower() in ("true", "1"))
+    ENABLE_WIKIDATA_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_WIKIDATA_CONNECTOR", "true").lower() in ("true", "1"))
+    ENABLE_GITHUB_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_GITHUB_CONNECTOR", "true").lower() in ("true", "1"))
+
+    # Optional Connector Tokens
+    GITHUB_TOKEN: Optional[str] = Field(default_factory=lambda: os.getenv("GITHUB_TOKEN", None))
 
     # SearXNG Meta-Search Engine (Local development: http://localhost:8082)
     SEARXNG_URL: str = Field(default_factory=lambda: os.getenv("SEARXNG_URL", "http://localhost:8082").rstrip("/"))

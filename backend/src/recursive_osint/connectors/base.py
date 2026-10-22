@@ -49,6 +49,20 @@ class BaseSourceConnector(ABC):
         """Returns True if the connector has all necessary credentials/configurations to operate."""
         pass
 
+    @property
+    def is_simulated(self) -> bool:
+        """Indicates whether this connector yields simulated / demo records rather than real external data."""
+        return False
+
+    async def check_health(self) -> tuple[bool, str]:
+        """
+        Actively checks whether the provider endpoint is healthy and reachable.
+        Returns: (is_healthy, status_message)
+        """
+        if not self.is_configured:
+            return False, "unconfigured"
+        return True, "online"
+
     @abstractmethod
     async def search(
         self, query: str, max_results: int = 10, **kwargs: Any

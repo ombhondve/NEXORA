@@ -73,6 +73,8 @@ class SourceConnectorStatusResponse(BaseModel):
     coverage_info: str
     requires_api_key: bool
     is_configured: bool
+    health_status: str = "online"
+    is_simulated: bool = False
 
 
 class InvestigationReportResponse(BaseModel):

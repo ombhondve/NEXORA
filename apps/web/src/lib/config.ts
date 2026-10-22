@@ -10,21 +10,30 @@ export interface FrontendConfig {
 }
 
 function sanitizeApiUrl(rawUrl: string | undefined): string {
-  if (!rawUrl || !rawUrl.trim()) {
-    return 'http://localhost:8000';
-  }
-  const trimmed = rawUrl.trim();
-  try {
-    const parsed = new URL(trimmed);
-    if (!['http:', 'https:'].includes(parsed.protocol)) {
-      console.warn(
-        `[Config Warning]: NEXT_PUBLIC_API_URL protocol '${parsed.protocol}' is unusual. Expected 'http:' or 'https:'.`
-      );
+  if (rawUrl && rawUrl.trim()) {
+    const trimmed = rawUrl.trim();
+    if (
+      typeof window !== 'undefined' &&
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1'
+    ) {
+      if (trimmed.includes('localhost') || trimmed.includes('127.0.0.1')) {
+        console.warn(
+          '[Config Warning]: In production browser environment but NEXT_PUBLIC_API_URL points to localhost. Falling back to origin.'
+        );
+        return window.location.origin;
+      }
     }
     return trimmed.replace(/\/+$/, '');
-  } catch {
-    return trimmed.replace(/\/+$/, '');
   }
+
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return window.location.origin;
+    }
+  }
+
+  return 'http://localhost:8000';
 }
 
 export function getFrontendConfig(): FrontendConfig {

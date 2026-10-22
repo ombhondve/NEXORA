@@ -41,16 +41,27 @@ class SearchService:
     @staticmethod
     def get_source_statuses() -> List[SourceConnectorStatusResponse]:
         connectors = connector_registry.list_all()
-        return [
-            SourceConnectorStatusResponse(
-                name=c.name,
-                display_name=c.display_name,
-                connector_type=c.connector_type,
-                is_enabled=True,
-                rate_limit_per_minute=c.rate_limit_per_minute,
-                coverage_info=c.coverage_info,
-                requires_api_key=c.requires_api_key,
-                is_configured=c.is_configured,
+        statuses = []
+        for c in connectors:
+            if not c.is_configured:
+                h_status = "unconfigured"
+            elif c.is_simulated:
+                h_status = "simulated"
+            else:
+                h_status = "online"
+
+            statuses.append(
+                SourceConnectorStatusResponse(
+                    name=c.name,
+                    display_name=c.display_name,
+                    connector_type=c.connector_type,
+                    is_enabled=True,
+                    rate_limit_per_minute=c.rate_limit_per_minute,
+                    coverage_info=c.coverage_info,
+                    requires_api_key=c.requires_api_key,
+                    is_configured=c.is_configured,
+                    health_status=h_status,
+                    is_simulated=c.is_simulated,
+                )
             )
-            for c in connectors
-        ]
+        return statuses
