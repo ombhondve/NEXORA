@@ -51,29 +51,37 @@ async def lifespan(app: FastAPI):
             )
 
 
-    # Initialize tables if in development
-    if "sqlite" in settings.DATABASE_URL:
+    # Initialize database tables (idempotent, ensures tables exist in PostgreSQL / Neon and SQLite)
+    try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        logger.info("Local development schema ready.")
+        logger.info("Database schema initialized.")
+    except Exception as exc:
+        logger.warning("Database schema initialization encountered: %s", exc)
+
 
     # Seed demo account ONLY in non-production environments when explicitly enabled
     if settings.ENVIRONMENT != "production" and settings.ENABLE_DEV_SEEDS:
-        async with AsyncSessionLocal() as session:
-            from recursive_osint.db.repositories.user_repo import UserRepository
-            repo = UserRepository(session)
-            existing = await repo.get_by_email("demo@example.org")
-            if not existing:
-                demo_user = User(
-                    email="demo@example.org",
-                    hashed_password=hash_password("password123"),
-                    full_name="Lead OSINT Investigator",
-                    role="investigator",
-                    is_active=True,
-                )
-                session.add(demo_user)
-                await session.commit()
-                logger.info("[DEV ONLY] Seeded development user: demo@example.org")
+        try:
+
+            async with AsyncSessionLocal() as session:
+                from recursive_osint.db.repositories.user_repo import UserRepository
+                repo = UserRepository(session)
+                existing = await repo.get_by_email("demo@example.org")
+                if not existing:
+                    demo_user = User(
+                        email="demo@example.org",
+                        hashed_password=hash_password("password123"),
+                        full_name="Lead OSINT Investigator",
+                        role="investigator",
+                        is_active=True,
+                    )
+                    session.add(demo_user)
+                    await session.commit()
+                    logger.info("[DEV ONLY] Seeded development user: demo@example.org")
+        except Exception as exc:
+            logger.warning("Could not complete dev seed user creation: %s", exc)
+
 
     yield
 

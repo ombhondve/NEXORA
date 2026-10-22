@@ -14,16 +14,18 @@ class InvestigationRepository(BaseRepository[Investigation]):
     def __init__(self, session: AsyncSession):
         super().__init__(Investigation, session)
 
-    async def list_by_user(self, user_id: str, skip: int = 0, limit: int = 50) -> List[Investigation]:
+    async def list_by_user(self, user_id: Optional[str] = None, skip: int = 0, limit: int = 50) -> List[Investigation]:
         stmt = (
             select(Investigation)
-            .where(Investigation.user_id == user_id)
             .order_by(desc(Investigation.created_at))
             .offset(skip)
             .limit(limit)
         )
+        if user_id:
+            stmt = stmt.where(Investigation.user_id == user_id)
         res = await self.session.execute(stmt)
         return list(res.scalars().all())
+
 
     async def get_with_events(self, investigation_id: str) -> Optional[Investigation]:
         stmt = select(Investigation).where(Investigation.id == investigation_id)

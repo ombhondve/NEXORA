@@ -30,11 +30,12 @@ class UserLogin(BaseModel):
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: str
-    email: str
+    id: Optional[str] = None
+    email: Optional[str] = None
     full_name: Optional[str] = None
-    role: str
-    is_active: bool
+    role: str = "analyst"
+    is_active: bool = True
+
 
 
 class Token(BaseModel):

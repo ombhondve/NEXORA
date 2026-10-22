@@ -12,7 +12,7 @@ from recursive_osint.db.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 class Investigation(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "investigations"
 
-    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=True, default=None)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     target_clue: Mapped[str] = mapped_column(Text, nullable=False)

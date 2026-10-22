@@ -172,7 +172,9 @@ Frontend Web Dashboard will be live at: `http://localhost:3000`
 | `REFRESH_TOKEN_EXPIRE_DAYS` | No | `7` | Internal | Lifetime of refresh tokens in days. |
 | `ALLOW_ANONYMOUS_DEV_AUTH` | No | `false` | Internal | Dev auth bypass (strictly forbidden in production). |
 | `ENABLE_DEV_SEEDS` | No | `false` | Internal | Seeds demo analyst accounts on launch. |
+| `REQUIRE_AUTH` | No | `false` | Public | Enforces login/JWT auth when `true`. Default `false` makes NEXORA fully public. |
 | `CORS_ORIGINS` | Yes | `http://localhost:3000` | Public | Comma-separated allowed frontend origins. |
+
 
 ---
 

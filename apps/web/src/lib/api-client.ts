@@ -14,17 +14,11 @@ const API_BASE = frontendConfig.apiUrl;
 
 class ApiClient {
   private getHeaders(): HeadersInit {
-    const headers: Record<string, string> = {
+    return {
       'Content-Type': 'application/json',
     };
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('osint_token');
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
-    }
-    return headers;
   }
+
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const url = `${API_BASE}/api/v1${endpoint}`;

@@ -18,7 +18,7 @@ class InvestigationService:
         self.session = session
         self.repo = InvestigationRepository(session)
 
-    async def create_investigation(self, user_id: str, data: InvestigationCreate) -> Investigation:
+    async def create_investigation(self, user_id: Optional[str], data: InvestigationCreate) -> Investigation:
         investigation = Investigation(
             user_id=user_id,
             title=data.title,
@@ -42,23 +42,24 @@ class InvestigationService:
         )
         return created
 
-    async def get_investigation(self, investigation_id: str, user_id: str) -> Investigation:
+    async def get_investigation(self, investigation_id: str, user_id: Optional[str] = None) -> Investigation:
         inv = await self.repo.get_by_id(investigation_id)
         if not inv:
             raise EntityNotFoundError(f"Investigation {investigation_id} not found.")
-        if inv.user_id != user_id:
+        # If user_id is provided and the investigation has an owner, verify ownership
+        if user_id and inv.user_id and inv.user_id != user_id:
             raise AccessDeniedError("Access to this investigation is restricted to its owner.")
         return inv
 
-    async def list_user_investigations(self, user_id: str, skip: int = 0, limit: int = 50) -> List[Investigation]:
+    async def list_user_investigations(self, user_id: Optional[str] = None, skip: int = 0, limit: int = 50) -> List[Investigation]:
         return await self.repo.list_by_user(user_id, skip=skip, limit=limit)
 
-    async def start_discovery(self, investigation_id: str, user_id: str) -> Investigation:
+    async def start_discovery(self, investigation_id: str, user_id: Optional[str] = None) -> Investigation:
         inv = await self.get_investigation(investigation_id, user_id)
         engine = RecursiveDiscoveryEngine(self.session, inv)
         return await engine.execute()
 
-    async def cancel_discovery(self, investigation_id: str, user_id: str) -> Investigation:
+    async def cancel_discovery(self, investigation_id: str, user_id: Optional[str] = None) -> Investigation:
         inv = await self.get_investigation(investigation_id, user_id)
         inv.status = "cancelled"
         inv.stop_reason = "Cancelled by user request."
@@ -72,6 +73,7 @@ class InvestigationService:
         await self.session.commit()
         return inv
 
-    async def get_events(self, investigation_id: str, user_id: str) -> List[InvestigationEvent]:
+    async def get_events(self, investigation_id: str, user_id: Optional[str] = None) -> List[InvestigationEvent]:
         await self.get_investigation(investigation_id, user_id)
         return await self.repo.get_events(investigation_id)
+

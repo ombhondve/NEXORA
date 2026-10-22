@@ -2,7 +2,7 @@
 FastAPI route dependencies with strict production authorization.
 """
 
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,47 +17,49 @@ from recursive_osint.db.repositories.user_repo import UserRepository
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
+async def get_optional_user(
+    auth: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> Optional[User]:
+    """Extracts current authenticated user if Bearer token is provided and valid, otherwise returns None."""
+    if not auth or not auth.credentials:
+        return None
+
+    try:
+        payload = decode_access_token(auth.credentials)
+        user_id = payload.get("sub")
+        if not user_id:
+            return None
+
+        repo = UserRepository(db)
+        user = await repo.get_by_id(user_id)
+        if user and user.is_active:
+            return user
+        return None
+    except Exception:
+        return None
+
+
 async def get_current_user(
     auth: HTTPAuthorizationCredentials = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
-) -> User:
-    """Extracts and validates current authenticated user from JWT token."""
-    if not auth:
-        if settings.ENVIRONMENT != "production" and settings.ALLOW_ANONYMOUS_DEV_AUTH:
-            # Only allowed if explicitly toggled on in development mode
-            repo = UserRepository(db)
-            user = await repo.get_by_email("demo@example.org")
-            if user and user.is_active:
-                return user
+) -> Optional[User]:
+    """
+    Validates current authenticated user from JWT token.
+    When REQUIRE_AUTH=false (default), authentication is optional and unauthenticated requests return None without error.
+    When REQUIRE_AUTH=true, authentication is strictly enforced and missing credentials raise HTTP 401.
+    """
+    user = await get_optional_user(auth=auth, db=db)
+    if user:
+        return user
 
+    if settings.REQUIRE_AUTH:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication credentials were not provided or are invalid.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    try:
-        payload = decode_access_token(auth.credentials)
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid access token payload.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    # In public mode (REQUIRE_AUTH=False), return None without error
+    return None
 
-        repo = UserRepository(db)
-        user = await repo.get_by_id(user_id)
-        if not user or not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User account is inactive or no longer exists.",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
-    except SecurityException as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"},
-        )

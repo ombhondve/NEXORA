@@ -181,6 +181,8 @@ class Settings(BaseModel):
     REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default_factory=lambda: int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7")))
     ALLOW_ANONYMOUS_DEV_AUTH: bool = Field(default_factory=lambda: os.getenv("ALLOW_ANONYMOUS_DEV_AUTH", "false").lower() in ("true", "1"))
     ENABLE_DEV_SEEDS: bool = Field(default_factory=lambda: os.getenv("ENABLE_DEV_SEEDS", "false").lower() in ("true", "1"))
+    REQUIRE_AUTH: bool = Field(default_factory=lambda: os.getenv("REQUIRE_AUTH", "false").lower() in ("true", "1"))
+
 
     # CORS
     CORS_ORIGINS: str = Field(default_factory=lambda: os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"))
@@ -406,8 +408,9 @@ class Settings(BaseModel):
                     "Neon requires SSL encryption (sslmode=require)."
                 )
 
-            if self.ALLOW_ANONYMOUS_DEV_AUTH:
-                raise ValueError("FATAL [Production Security]: ALLOW_ANONYMOUS_DEV_AUTH must be disabled in production.")
+            if self.REQUIRE_AUTH and self.ALLOW_ANONYMOUS_DEV_AUTH:
+                raise ValueError("FATAL [Production Security]: ALLOW_ANONYMOUS_DEV_AUTH must be disabled in production when REQUIRE_AUTH is enabled.")
+
 
             if self.DEBUG:
                 raise ValueError("FATAL [Production Security]: DEBUG mode must be False in production.")

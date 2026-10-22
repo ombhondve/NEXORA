@@ -5,6 +5,8 @@ Authentication endpoints.
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from typing import Optional
+
 from recursive_osint.api.dependencies import get_current_user
 from recursive_osint.db.session import get_db
 from recursive_osint.db.models.user import User
@@ -29,6 +31,15 @@ async def login(login_data: UserLogin, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_current_user_profile(current_user: User = Depends(get_current_user)):
-    """Retrieves profile of the currently authenticated user."""
+async def get_current_user_profile(current_user: Optional[User] = Depends(get_current_user)):
+    """Retrieves profile of the currently authenticated user, or public guest state."""
+    if not current_user:
+        return UserResponse(
+            id=None,
+            email=None,
+            full_name="Public Analyst",
+            role="analyst",
+            is_active=True,
+        )
     return UserResponse.model_validate(current_user)
+
