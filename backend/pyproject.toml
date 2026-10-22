@@ -43,6 +43,9 @@ dev = [
     "mypy>=1.11.2",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/recursive_osint"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
