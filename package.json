@@ -1,0 +1,26 @@
+{
+  "name": "recursive-osint-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Recursive OSINT Discovery Engine - Enterprise Investigation Platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "start:web": "npm --prefix apps/web run start",
+    "lint:web": "npm --prefix apps/web run lint",
+    "typecheck": "npm --prefix apps/web run typecheck"
+  },
+  "keywords": [
+    "osint",
+    "investigation",
+    "recursive-discovery",
+    "cybersecurity",
+    "full-text-search"
+  ],
+  "author": "Recursive OSINT Team",
+  "license": "Apache-2.0"
+}

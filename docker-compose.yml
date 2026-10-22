@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: osint_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-osint_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-osint_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-osint_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-osint_user} -d ${POSTGRES_DB:-osint_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - osint-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: osint_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - osint-network
+
+  opensearch:
+    image: opensearchproject/opensearch:2.15.0
+    container_name: osint_opensearch
+    restart: unless-stopped
+    environment:
+      - cluster.name=osint-cluster
+      - node.name=osint-node1
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m"
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    ports:
+      - "9200:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+    networks:
+      - osint-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: osint_backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://osint_user:osint_secure_pass@db:5432/osint_db
+      - REDIS_URL=redis://redis:6379/0
+      - OPENSEARCH_URL=http://opensearch:9200
+      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY:-replace-with-a-64-char-random-key-in-production}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - uploads-data:/app/storage/uploads
+    networks:
+      - osint-network
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: osint_web
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - osint-network
+
+networks:
+  osint-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  opensearch-data:
+  uploads-data:
