@@ -59,3 +59,13 @@ async def root():
         "documentation": "/docs",
         "api_v1": settings.API_V1_PREFIX,
     }
+
+
+@app.get("/health", tags=["Health"])
+async def health():
+    return {
+        "status": "healthy",
+        "app": settings.APP_NAME,
+        "version": "1.0.0",
+    }
+
