@@ -379,14 +379,27 @@ class Settings(BaseModel):
     SERPER_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("SERPER_API_KEY", None))
     BRAVE_SEARCH_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("BRAVE_SEARCH_API_KEY", None))
 
-    # Phase 2: Local AI Intelligence Layer (Ollama / Qwen3:4b)
+    # Phase 2: Production Multi-Provider AI Intelligence Layer (Gemini Primary + Groq Fallback)
     AI_ENABLED: bool = Field(default_factory=lambda: os.getenv("AI_ENABLED", "true").lower() in ("true", "1"))
-    OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"))
-    OLLAMA_MODEL: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen3:4b"))
-    OLLAMA_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120.0")))
-    OLLAMA_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("OLLAMA_API_KEY", None))
-    AI_MAX_EVIDENCE_ITEMS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_EVIDENCE_ITEMS", "20")))
-    AI_MAX_INPUT_TOKENS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_INPUT_TOKENS", "4096")))
+    AI_PROVIDER: str = Field(default_factory=lambda: os.getenv("AI_PROVIDER", "gemini").lower())
+
+    # Primary Provider: Google Gemini
+    GEMINI_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", None))
+    GEMINI_MODEL: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+    GEMINI_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_TIMEOUT_SECONDS", "60.0")))
+    GEMINI_RATE_LIMIT_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_RATE_LIMIT_COOLDOWN_SECONDS", "60.0")))
+    GEMINI_QUOTA_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "300.0")))
+
+    # Secondary / Fallback Provider: Groq
+    GROQ_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("GROQ_API_KEY", None))
+    GROQ_MODEL: str = Field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+    GROQ_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_TIMEOUT_SECONDS", "60.0")))
+    GROQ_RATE_LIMIT_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_RATE_LIMIT_COOLDOWN_SECONDS", "60.0")))
+    GROQ_QUOTA_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_QUOTA_COOLDOWN_SECONDS", "300.0")))
+
+    # Token & Item Controls
+    AI_MAX_EVIDENCE_ITEMS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_EVIDENCE_ITEMS", "25")))
+    AI_MAX_INPUT_TOKENS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_INPUT_TOKENS", "8192")))
 
     def validate_production_readiness(self) -> None:
         """
@@ -458,12 +471,6 @@ class Settings(BaseModel):
 
             if self.DEBUG:
                 raise ValueError("FATAL [Production Security]: DEBUG mode must be False in production.")
-
-        if self.OLLAMA_BASE_URL:
-            if not (self.OLLAMA_BASE_URL.startswith("http://") or self.OLLAMA_BASE_URL.startswith("https://")):
-                raise ValueError(
-                    f"FATAL [Config]: OLLAMA_BASE_URL '{self.OLLAMA_BASE_URL}' must start with http:// or https://"
-                )
 
 
 settings = Settings()

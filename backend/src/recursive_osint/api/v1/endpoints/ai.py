@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from recursive_osint.ai.analysis_service import AIAnalysisService
-from recursive_osint.ai.ollama_client import OllamaClient, AIEngineError
+from recursive_osint.ai.errors import AIEngineError
+from recursive_osint.ai.provider_manager import get_ai_provider_manager
 from recursive_osint.api.dependencies import get_optional_user
 from recursive_osint.config import settings
 from recursive_osint.core.logging import get_logger
@@ -31,17 +32,23 @@ router = APIRouter(tags=["AI Intelligence"])
 @router.get("/ai/health", response_model=AIHealthResponse)
 async def check_ai_health():
     """
-    Checks the status and availability of the Ollama LLM provider and target model.
-    Does not crash if Ollama is unreachable.
+    Checks the status and availability of the primary (Gemini) and fallback (Groq) providers.
+    Does not crash if providers are in cooldown or unconfigured.
     """
-    client = OllamaClient()
-    status_code, details = await client.check_health()
+    manager = get_ai_provider_manager()
+    status_code, details = await manager.check_health()
+    active_prov = manager.active_provider_name
+    active_model = manager.gemini.model if active_prov == "gemini" else manager.groq.model
+
     return AIHealthResponse(
         status=status_code,
-        provider="ollama",
-        model=settings.OLLAMA_MODEL,
-        ollama_base_url=client.redacted_base_url,
+        provider=active_prov,
+        model=active_model,
+        primary_provider="gemini",
+        fallback_provider="groq",
         details=details,
+        gemini_status=manager.state["gemini"].status,
+        groq_status=manager.state["groq"].status,
     )
 
 

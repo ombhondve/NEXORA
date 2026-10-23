@@ -225,7 +225,9 @@ Strict precedence:
 | `S3_SECRET_ACCESS_KEY` | Conditional | **Secret** | S3 secret access key (required if `STORAGE_BACKEND="s3"`). |
 
 | `ENABLE_SSRF_PROTECTION` | No | Security | Blocks local/private IP addresses from recursive crawling (default: `true`). |
-| `AI_PROVIDER` | No | Public | LLM synthesis provider: `none`, `openai`, `anthropic`, `ollama`. |
+| `AI_PROVIDER` | No | Public | LLM synthesis provider: `gemini` (primary with automatic `groq` fallback). |
+| `GEMINI_API_KEY` | No | **Secret** | Google Gemini API key for primary AI investigation synthesis. |
+| `GROQ_API_KEY` | No | **Secret** | Groq API key for secondary / automatic fallback synthesis. |
 | `AI_API_KEY` | No | **Secret** | API key for configured AI provider. |
 | `TAVILY_API_KEY` | No | **Secret** | Tavily search API key (optional). |
 | `SERPER_API_KEY` | No | **Secret** | Serper Google search API key (optional). |

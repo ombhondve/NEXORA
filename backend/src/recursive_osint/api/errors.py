@@ -72,7 +72,7 @@ def register_exception_handlers(app):
         )
 
     # Register AIEngineError handler
-    from recursive_osint.ai.ollama_client import AIEngineError
+    from recursive_osint.ai.errors import AIEngineError
 
     @app.exception_handler(AIEngineError)
     async def ai_engine_error_handler(request: Request, exc: AIEngineError):

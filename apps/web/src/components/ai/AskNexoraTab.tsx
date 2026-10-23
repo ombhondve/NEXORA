@@ -47,7 +47,7 @@ export function AskNexoraTab({ investigationId, evidence }: AskNexoraTabProps) {
       console.error('Ask NEXORA error:', err);
       setError(
         err?.message ||
-          'Failed to query AI assistant. Ensure Ollama is running with qwen3:4b (http://localhost:11434).'
+          'Failed to query AI assistant. Verify that GEMINI_API_KEY or GROQ_API_KEY is configured in backend environment.'
       );
     } finally {
       setLoading(false);

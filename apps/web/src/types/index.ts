@@ -146,11 +146,14 @@ export interface LeadGraphResponse {
 }
 
 export interface AIHealthResponse {
-  status: 'ready' | 'disabled' | 'unreachable' | 'model_unavailable' | 'error';
+  status: 'ready' | 'fallback_active' | 'rate_limited' | 'quota_exhausted' | 'configuration_error' | 'disabled' | 'unavailable' | 'error';
   provider: string;
   model: string;
-  ollama_base_url: string;
+  primary_provider?: string;
+  fallback_provider?: string;
   details: string;
+  gemini_status?: string;
+  groq_status?: string;
 }
 
 export interface AIEvidenceSummaryItem {

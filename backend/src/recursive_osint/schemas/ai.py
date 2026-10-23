@@ -10,11 +10,14 @@ from pydantic import BaseModel, Field, ConfigDict
 
 
 class AIHealthResponse(BaseModel):
-    status: str = Field(..., description="Operational status: ready, disabled, unreachable, model_unavailable, error")
-    provider: str = "ollama"
-    model: str
-    ollama_base_url: str
+    status: str = Field(..., description="Operational status: ready, fallback_active, rate_limited, quota_exhausted, configuration_error, disabled, unavailable")
+    provider: str = Field(default="gemini", description="Active AI provider: gemini or groq")
+    model: str = Field(..., description="Active model name")
+    primary_provider: str = "gemini"
+    fallback_provider: str = "groq"
     details: str
+    gemini_status: Optional[str] = None
+    groq_status: Optional[str] = None
 
 
 class AIEvidenceSummaryItem(BaseModel):

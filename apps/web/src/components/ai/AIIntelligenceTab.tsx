@@ -53,10 +53,11 @@ export function AIIntelligenceTab({
       .catch(() => {
         if (mounted) {
           setProviderHealth({
-            status: 'unreachable',
-            provider: 'ollama',
-            model: 'qwen3:4b',
-            ollama_base_url: 'unconfigured',
+            status: 'unavailable',
+            provider: 'gemini',
+            model: 'gemini-1.5-flash',
+            primary_provider: 'gemini',
+            fallback_provider: 'groq',
             details: 'AI health endpoint unreachable.',
           });
         }
@@ -85,7 +86,27 @@ export function AIIntelligenceTab({
     }
   };
 
-  const isProviderReady = providerHealth?.status === 'ready';
+  const isProviderReady = providerHealth?.status === 'ready' || providerHealth?.status === 'fallback_active';
+
+  const getStatusLabel = () => {
+    if (!providerHealth) return 'Checking AI status...';
+    switch (providerHealth.status) {
+      case 'ready':
+        return `${providerHealth.provider === 'gemini' ? 'Gemini' : 'Groq'} active`;
+      case 'fallback_active':
+        return 'Groq active — Gemini quota reached';
+      case 'rate_limited':
+        return 'Temporarily rate-limited';
+      case 'quota_exhausted':
+        return 'All AI quotas exhausted';
+      case 'configuration_error':
+        return 'AI configuration required';
+      case 'disabled':
+        return 'AI disabled';
+      default:
+        return 'All AI providers temporarily unavailable';
+    }
+  };
 
   return (
     <div className="space-y-6 font-mono text-xs">
@@ -99,12 +120,12 @@ export function AIIntelligenceTab({
             <div className="flex items-center space-x-2">
               <h2 className="text-sm font-bold text-white">AI Evidence Intelligence</h2>
               <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/30">
-                {providerHealth?.model || 'qwen3:4b'} @ {providerHealth?.provider || 'Ollama'}
+                {providerHealth?.model || 'gemini-1.5-flash'} @ {providerHealth?.provider || 'Gemini'}
               </span>
               {providerHealth && (
                 <span
                   className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
-                    providerHealth.status === 'ready'
+                    providerHealth.status === 'ready' || providerHealth.status === 'fallback_active'
                       ? 'bg-emerald-950/80 text-emerald-400 border-emerald-600/40'
                       : providerHealth.status === 'disabled'
                       ? 'bg-slate-900 text-slate-400 border-slate-700'
@@ -112,17 +133,17 @@ export function AIIntelligenceTab({
                   }`}
                   title={providerHealth.details}
                 >
-                  {providerHealth.status === 'ready' ? (
+                  {providerHealth.status === 'ready' || providerHealth.status === 'fallback_active' ? (
                     <Wifi className="w-3 h-3 text-emerald-400" />
                   ) : (
                     <WifiOff className="w-3 h-3 text-amber-400" />
                   )}
-                  <span className="capitalize">{providerHealth.status.replace('_', ' ')}</span>
+                  <span>{getStatusLabel()}</span>
                 </span>
               )}
             </div>
             <p className="text-slate-400 text-[11px] mt-0.5">
-              Grounded OSINT summarization, contextual entity extraction, and relationship discovery
+              Grounded OSINT summarization, contextual entity extraction, and relationship discovery (Gemini Primary + Groq Fallback)
             </p>
           </div>
         </div>
@@ -155,20 +176,18 @@ export function AIIntelligenceTab({
           </div>
           <p className="text-[11px] leading-relaxed">{error}</p>
 
-          {error.includes('OLLAMA_BASE_URL') && (
+          {(error.includes('GEMINI_API_KEY') || error.includes('GROQ_API_KEY') || error.includes('No AI provider credentials') || error.includes('configuration')) && (
             <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2 text-[10px] text-slate-300">
               <div className="font-bold text-cyber-cyan flex items-center gap-1.5">
-                <span>Required Vercel Configuration Key:</span>
-                <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-cyber-cyan/40 text-cyber-cyan font-bold">
-                  OLLAMA_BASE_URL
-                </code>
+                <span>Configured AI Architecture:</span>
+                <span className="text-slate-400">Google Gemini (Primary) + Groq (Automatic Fallback)</span>
               </div>
               <p className="text-slate-400">
-                In cloud deployments (Vercel), serverless functions run in isolated AWS Lambda containers.
-                Set <code className="text-white">OLLAMA_BASE_URL</code> in your Vercel Project Settings &rarr; Environment Variables to your reachable HTTPS Ollama host (e.g. Cloudflare Tunnel, ngrok tunnel, or cloud GPU instance).
+                To enable AI analysis, set <code className="text-cyber-cyan font-bold">GEMINI_API_KEY</code> and optionally <code className="text-cyber-emerald font-bold">GROQ_API_KEY</code> in your environment variables.
               </p>
-              <div className="font-mono text-slate-400 bg-slate-950 p-2 rounded border border-cyber-border/50 text-[10px]">
-                OLLAMA_BASE_URL=https://your-reachable-ollama-host
+              <div className="font-mono text-slate-400 bg-slate-950 p-2 rounded border border-cyber-border/50 text-[10px] space-y-1">
+                <div>GEMINI_API_KEY=AIzaSy...</div>
+                <div>GROQ_API_KEY=gsk_...</div>
               </div>
             </div>
           )}
@@ -204,7 +223,7 @@ export function AIIntelligenceTab({
           <RefreshCw className="w-8 h-8 animate-spin mx-auto text-cyber-cyan" />
           <p className="text-white font-bold text-sm">Evaluating OSINT Evidence Passages...</p>
           <p className="text-slate-400 text-[11px] max-w-md mx-auto">
-            Extracting entities, validating source citations, and mapping relational candidates using {providerHealth?.model || 'qwen3:4b'}.
+            Extracting entities, validating source citations, and mapping relational candidates using {providerHealth?.model || 'gemini-1.5-flash'}.
           </p>
         </div>
       )}

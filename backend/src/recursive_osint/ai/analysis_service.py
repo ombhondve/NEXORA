@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from recursive_osint.ai.ollama_client import OllamaClient, AIEngineError
+from recursive_osint.ai.errors import AIEngineError
+from recursive_osint.ai.provider_manager import AIProviderManager, get_ai_provider_manager
 from recursive_osint.config import settings
 from recursive_osint.core.logging import get_logger
 from recursive_osint.db.models.ai_analysis import InvestigationAIAnalysis
@@ -41,11 +42,15 @@ class AIAnalysisService:
     _active_investigations: Set[str] = set()
     _active_lock: asyncio.Lock = asyncio.Lock()
 
-    def __init__(self, session: AsyncSession, ollama_client: Optional[OllamaClient] = None):
+    def __init__(
+        self,
+        session: AsyncSession,
+        ai_client: Optional[Any] = None,
+    ):
         self.session = session
         self.evidence_repo = EvidenceRepository(session)
         self.inv_repo = InvestigationRepository(session)
-        self.client = ollama_client or OllamaClient()
+        self.client = ai_client or get_ai_provider_manager()
 
     async def get_latest_analysis(self, investigation_id: str) -> Optional[AIInvestigationAnalysis]:
         """Retrieves the most recent saved AI analysis for the investigation."""
@@ -209,8 +214,9 @@ class AIAnalysisService:
         ]
 
         logger.info(
-            "Dispatching AI analysis to %s for investigation %s (%d evidence items)...",
-            self.client.redacted_base_url,
+            "Dispatching AI analysis to %s (%s) for investigation %s (%d evidence items)...",
+            getattr(self.client, "active_provider_name", getattr(self.client, "name", "ai")),
+            getattr(self.client, "active_model", getattr(self.client, "model", "default")),
             investigation_id,
             len(selected_evidence),
         )
@@ -324,7 +330,7 @@ class AIAnalysisService:
 
         analysis = AIInvestigationAnalysis(
             investigation_id=investigation_id,
-            model_name=self.client.model,
+            model_name=res.get("model", getattr(self.client, "model", getattr(self.client, "active_model", "gemini-1.5-flash"))),
             objective=data.get("objective", f"Analyze OSINT findings for: {target_clue}"),
             executive_summary=data.get("executive_summary", "Analysis completed."),
             key_findings=key_findings,
@@ -474,7 +480,7 @@ class AIAnalysisService:
     async def generate_ai_report(self, investigation_id: str) -> Dict[str, Any]:
         """
         Generates an extended AI-assisted OSINT report.
-        Falls back to deterministic report if Ollama is unreachable.
+        Falls back to deterministic report if AI providers are unreachable.
         """
         inv = await self.inv_repo.get_by_id(investigation_id)
         if not inv:
