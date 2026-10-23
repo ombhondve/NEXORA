@@ -1,7 +1,8 @@
 """
 Groq AI Provider for NEXORA.
 Implements secondary / fallback AI model generation using the official groq SDK.
-Supports structured JSON output, timeout handling, error mapping, and credential security.
+Supports dynamic model verification against Groq's catalog, structured JSON output,
+timeout handling, granular error mapping (quota vs auth vs invalid model), and credential security.
 """
 
 import asyncio
@@ -16,6 +17,14 @@ from recursive_osint.core.logging import get_logger
 
 logger = get_logger("ai.provider.groq")
 
+# Known active Groq models in order of capability / preference
+GROQ_PREFERENCE_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.8-27b",
+    "meta-models/muse-spark-open",
+]
+
 
 class GroqProvider(BaseAIProvider):
     """Secondary / Fallback AI provider leveraging Groq LPU inference."""
@@ -27,14 +36,14 @@ class GroqProvider(BaseAIProvider):
         timeout_seconds: Optional[float] = None,
     ):
         name = "groq"
-        active_model = model or settings.GROQ_MODEL or "llama-3.3-70b-versatile"
+        active_model = (model or settings.GROQ_MODEL or "openai/gpt-oss-120b").strip()
         active_timeout = timeout_seconds or settings.GROQ_TIMEOUT_SECONDS or 60.0
         super().__init__(name=name, model=active_model, timeout_seconds=active_timeout)
 
         self.api_key = (api_key or settings.GROQ_API_KEY or "").strip()
         self._client: Optional[AsyncGroq] = None
-        if self.api_key:
-            self._client = AsyncGroq(api_key=self.api_key, timeout=self.timeout_seconds)
+        self._resolved_model: Optional[str] = None
+        self._model_verified: bool = False
 
     @property
     def is_configured(self) -> bool:
@@ -53,6 +62,61 @@ class GroqProvider(BaseAIProvider):
             self._client = AsyncGroq(api_key=self.api_key, timeout=self.timeout_seconds)
         return self._client
 
+    async def resolve_working_model(self) -> str:
+        """
+        Verifies the configured Groq model against the account's active model catalog.
+        If the configured model is available, returns it.
+        Otherwise, automatically resolves to a verified candidate (e.g. openai/gpt-oss-120b).
+        """
+        if self._resolved_model and self._model_verified:
+            return self._resolved_model
+
+        if not self.is_configured:
+            return self.model
+
+        client = self._get_client()
+        configured_target = self.model.strip()
+
+        try:
+            model_list_resp = await client.models.list()
+            available_ids = [getattr(m, "id", "") for m in getattr(model_list_resp, "data", []) if getattr(m, "id", "")]
+            logger.info("Groq model discovery: retrieved %d available models for this account", len(available_ids))
+
+            # If user's configured model is in available_ids, use it
+            if configured_target in available_ids:
+                self._resolved_model = configured_target
+                self._model_verified = True
+                return self._resolved_model
+
+            # Check if any preference models are available in the catalog
+            for cand in GROQ_PREFERENCE_MODELS:
+                if cand in available_ids:
+                    logger.warning(
+                        "Configured Groq model '%s' is not accessible for this account. "
+                        "Automatically resolved to verified model '%s'.",
+                        self.model,
+                        cand,
+                    )
+                    self._resolved_model = cand
+                    self._model_verified = True
+                    return self._resolved_model
+
+            if available_ids:
+                # Use first active model
+                self._resolved_model = available_ids[0]
+                self._model_verified = True
+                return self._resolved_model
+
+        except Exception as exc:
+            logger.warning(
+                "Could not dynamically query Groq models catalog (%s). Using configured model '%s'.",
+                str(exc),
+                self.model,
+            )
+
+        self._resolved_model = configured_target
+        return self._resolved_model
+
     async def generate(
         self,
         messages: List[Dict[str, str]],
@@ -63,9 +127,10 @@ class GroqProvider(BaseAIProvider):
         Executes an asynchronous chat completion request against Groq.
         """
         client = self._get_client()
+        model_to_use = await self.resolve_working_model()
 
         payload_kwargs: Dict[str, Any] = {
-            "model": self.model,
+            "model": model_to_use,
             "messages": messages,
             "temperature": temperature,
         }
@@ -74,6 +139,7 @@ class GroqProvider(BaseAIProvider):
 
         start_time = time.perf_counter()
         try:
+            logger.info("Calling Groq API with model: %s (json_mode=%s)...", model_to_use, json_mode)
             call_coro = client.chat.completions.create(**payload_kwargs)
             response = await asyncio.wait_for(call_coro, timeout=self.timeout_seconds)
 
@@ -86,15 +152,15 @@ class GroqProvider(BaseAIProvider):
             prompt_tokens = 0
             completion_tokens = 0
             if response.usage:
-                prompt_tokens = response.usage.prompt_tokens or 0
-                completion_tokens = response.usage.completion_tokens or 0
+                prompt_tokens = getattr(response.usage, "prompt_tokens", 0) or 0
+                completion_tokens = getattr(response.usage, "completion_tokens", 0) or 0
 
             return {
                 "content": content_text,
                 "prompt_tokens": prompt_tokens,
                 "completion_tokens": completion_tokens,
                 "provider": self.name,
-                "model": self.model,
+                "model": model_to_use,
                 "latency_ms": latency_ms,
             }
 
@@ -110,7 +176,6 @@ class GroqProvider(BaseAIProvider):
         except RateLimitError as exc:
             msg = str(exc)
             logger.warning("Groq rate limit / quota exceeded: %s", msg)
-            # Try to extract retry-after from response headers if available
             retry_after = None
             if hasattr(exc, "response") and exc.response and hasattr(exc.response, "headers"):
                 try:
@@ -143,7 +208,21 @@ class GroqProvider(BaseAIProvider):
         except APIStatusError as exc:
             code = exc.status_code
             msg = str(exc)
-            if code in (500, 502, 503, 504):
+            # Differentiate invalid/retired model error from quota exhaustion
+            if (
+                code == 404
+                or "does not exist" in msg.lower()
+                or "do not have access to it" in msg.lower()
+                or "model_not_found" in msg.lower()
+            ):
+                logger.warning("Groq model not found or inaccessible: %s", msg)
+                raise AIEngineError(
+                    f"Groq model '{model_to_use}' does not exist or account lacks access: {msg}",
+                    status_code=404,
+                    category="invalid_model",
+                    provider=self.name,
+                )
+            elif code in (500, 502, 503, 504):
                 raise AIEngineError(
                     f"Groq service temporarily unavailable (status {code}).",
                     status_code=503,
@@ -172,7 +251,7 @@ class GroqProvider(BaseAIProvider):
         Validates Groq provider availability.
         Returns:
             Tuple of (status, details)
-            Status values: 'ready', 'auth_error', 'quota_exhausted', 'rate_limited', 'unavailable', 'disabled'
+            Status values: 'ready', 'auth_error', 'quota_exhausted', 'rate_limited', 'invalid_model', 'unavailable', 'disabled'
         """
         if not self.is_configured:
             return (
@@ -182,9 +261,10 @@ class GroqProvider(BaseAIProvider):
 
         client = self._get_client()
         try:
+            model_to_check = await self.resolve_working_model()
             # Retrieve model information to verify key and model validity
             model_info = await asyncio.wait_for(
-                client.models.retrieve(self.model),
+                client.models.retrieve(model_to_check),
                 timeout=8.0,
             )
             return "ready", f"Groq is ready with model '{model_info.id}'."
@@ -194,5 +274,11 @@ class GroqProvider(BaseAIProvider):
             return "quota_exhausted", f"Groq quota exhausted: {str(exc)}"
         except AuthenticationError:
             return "auth_error", "Invalid GROQ_API_KEY. Verify credentials."
+        except APIStatusError as exc:
+            code = exc.status_code
+            msg = str(exc)
+            if code == 404 or "does not exist" in msg.lower() or "do not have access to it" in msg.lower():
+                return "invalid_model", f"Groq model '{self.model}' does not exist or account lacks access: {msg}"
+            return "unavailable", f"Groq health check error (status {code}): {msg}"
         except Exception as exc:
             return "unavailable", f"Groq health check failed: {str(exc)}"

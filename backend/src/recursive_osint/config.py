@@ -392,7 +392,7 @@ class Settings(BaseModel):
 
     # Secondary / Fallback Provider: Groq
     GROQ_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("GROQ_API_KEY", None))
-    GROQ_MODEL: str = Field(default_factory=lambda: os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+    GROQ_MODEL: str = Field(default_factory=lambda: os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))
     GROQ_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_TIMEOUT_SECONDS", "60.0")))
     GROQ_RATE_LIMIT_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_RATE_LIMIT_COOLDOWN_SECONDS", "60.0")))
     GROQ_QUOTA_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GROQ_QUOTA_COOLDOWN_SECONDS", "300.0")))

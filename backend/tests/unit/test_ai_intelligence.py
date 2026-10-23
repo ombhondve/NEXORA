@@ -93,7 +93,7 @@ class TestAIProviderManager:
     async def test_scenario_1_both_providers_healthy_gemini_handles(self):
         """1. Both providers are healthy: Gemini handles the request."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash")
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         res = await manager.chat([{"role": "user", "content": "hello"}])
@@ -106,7 +106,7 @@ class TestAIProviderManager:
     async def test_scenario_2_gemini_quota_exhausted_groq_handles(self):
         """2. Gemini quota exhausted: Groq handles the request."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash", fail_with_category="quota_exhausted", fail_status_code=429)
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         res = await manager.chat([{"role": "user", "content": "analyze"}])
@@ -159,7 +159,7 @@ class TestAIProviderManager:
     async def test_scenario_6_gemini_cooldown_expires_and_resumes_primary(self):
         """6. Gemini cooldown expires and Gemini successfully resumes primary status."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash")
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         # Artificially put Gemini into cooldown that has now expired
@@ -179,7 +179,7 @@ class TestAIProviderManager:
     async def test_scenario_7_gemini_remains_limited_groq_used_without_retry_storm(self):
         """7. Gemini remains limited after cooldown: Groq is used without a retry storm."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash", fail_with_category="quota_exhausted", fail_status_code=429)
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         # First request: Gemini fails, falls back to Groq, Gemini put into 300s cooldown
@@ -198,7 +198,7 @@ class TestAIProviderManager:
     async def test_scenario_8_invalid_gemini_key_falls_back_to_groq(self):
         """8. Invalid Gemini key: configuration error is recorded and Groq is used if available."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash", fail_with_category="auth_error", fail_status_code=401)
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         res = await manager.chat([{"role": "user", "content": "test auth"}])
@@ -214,7 +214,7 @@ class TestAIProviderManager:
             fail_with_category="invalid_model",
             fail_status_code=404,
         )
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         res = await manager.chat([{"role": "user", "content": "analyze model"}])
@@ -251,7 +251,7 @@ class TestAIProviderManager:
     async def test_scenario_11_timeout_and_temporary_service_failure(self):
         """11. Timeout and temporary service failure: bounded retries and fallback."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash", fail_with_category="timeout", fail_status_code=504)
-        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
         manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
 
         res = await manager.chat([{"role": "user", "content": "timeout test"}])
@@ -370,6 +370,103 @@ class TestGeminiModelVerification:
         assert exc_info.value.status_code == 404
         assert exc_info.value.category == "invalid_model"
         assert "not supported or not found" in exc_info.value.message
+
+
+class TestGroqModelVerification:
+    """Verifies that Groq model names are verified against Groq's catalog and resolved dynamically."""
+
+    @pytest.mark.asyncio
+    async def test_groq_verifies_and_resolves_working_model(self):
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="retired-llama-model")
+
+        mock_m1 = MagicMock()
+        mock_m1.id = "openai/gpt-oss-120b"
+        mock_list = MagicMock()
+        mock_list.data = [mock_m1]
+
+        mock_client = MagicMock()
+        mock_client.models.list = AsyncMock(return_value=mock_list)
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "openai/gpt-oss-120b"
+
+    @pytest.mark.asyncio
+    async def test_groq_preserves_custom_model_if_available(self):
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="openai/gpt-oss-20b")
+
+        mock_m1 = MagicMock()
+        mock_m1.id = "openai/gpt-oss-20b"
+        mock_list = MagicMock()
+        mock_list.data = [mock_m1]
+
+        mock_client = MagicMock()
+        mock_client.models.list = AsyncMock(return_value=mock_list)
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "openai/gpt-oss-20b"
+
+    @pytest.mark.asyncio
+    async def test_groq_404_maps_to_invalid_model_error(self):
+        import httpx
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+        from groq import APIStatusError
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="llama-3.3-70b-versatile")
+        provider._model_verified = True
+        provider._resolved_model = "llama-3.3-70b-versatile"
+
+        resp = httpx.Response(404, request=httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions"))
+        exc_404 = APIStatusError(
+            "The model 'llama-3.3-70b-versatile' does not exist or you do not have access to it.",
+            response=resp,
+            body={"error": {"code": "model_not_found"}},
+        )
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create = AsyncMock(side_effect=exc_404)
+        provider._client = mock_client
+
+        with pytest.raises(AIEngineError) as exc_info:
+            await provider.generate([{"role": "user", "content": "test"}])
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.category == "invalid_model"
+        assert exc_info.value.category != "quota_exhausted"
+        assert "does not exist or account lacks access" in exc_info.value.message
+
+    @pytest.mark.asyncio
+    async def test_real_or_mocked_groq_ping(self):
+        """Tests live Groq call if GROQ_API_KEY is present in environment; otherwise verifies mocked call."""
+        import os
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+
+        real_key = os.environ.get("GROQ_API_KEY")
+        if real_key:
+            provider = GroqProvider(api_key=real_key, model="openai/gpt-oss-120b")
+            res = await provider.generate([{"role": "user", "content": 'Respond in JSON: {"ping": "pong"}'}], json_mode=True)
+            assert res["provider"] == "groq"
+            assert "pong" in res["content"]
+        else:
+            provider = GroqProvider(api_key="gsk_mock_key_test", model="openai/gpt-oss-120b")
+            mock_client = MagicMock()
+            mock_resp = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = '{"ping": "pong"}'
+            mock_resp.choices = [mock_choice]
+            mock_resp.usage.prompt_tokens = 10
+            mock_resp.usage.completion_tokens = 5
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_resp)
+            mock_client.models.list = AsyncMock(return_value=MagicMock(data=[MagicMock(id="openai/gpt-oss-120b")]))
+            provider._client = mock_client
+            res = await provider.generate([{"role": "user", "content": "ping"}], json_mode=True)
+            assert res["provider"] == "groq"
+            assert "pong" in res["content"]
 
 
 # =====================================================================
