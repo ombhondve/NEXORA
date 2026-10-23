@@ -152,6 +152,8 @@ export interface AIHealthResponse {
   primary_provider?: string;
   fallback_provider?: string;
   details: string;
+  gemini_configured?: boolean;
+  groq_configured?: boolean;
   gemini_status?: string;
   groq_status?: string;
 }

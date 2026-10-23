@@ -16,6 +16,8 @@ class AIHealthResponse(BaseModel):
     primary_provider: str = "gemini"
     fallback_provider: str = "groq"
     details: str
+    gemini_configured: bool = False
+    groq_configured: bool = False
     gemini_status: Optional[str] = None
     groq_status: Optional[str] = None
 

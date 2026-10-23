@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from google.genai import Client, types
 from google.genai.errors import APIError
 
-from recursive_osint.ai.errors import AIEngineError
+from recursive_osint.ai.errors import AIEngineError, sanitize_secret_text
 from recursive_osint.ai.providers.base import BaseAIProvider
 from recursive_osint.config import settings
 from recursive_osint.core.logging import get_logger
@@ -20,14 +20,11 @@ logger = get_logger("ai.provider.gemini")
 
 # Known active Gemini models supporting generateContent in order of preference
 PREFERENCE_MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.5-flash-lite",
     "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-8b",
-    "gemini-1.5-flash",
     "gemini-2.5-pro",
-    "gemini-1.5-pro",
 ]
 
 
@@ -41,7 +38,8 @@ class GeminiProvider(BaseAIProvider):
         timeout_seconds: Optional[float] = None,
     ):
         name = "gemini"
-        active_model = (model or settings.GEMINI_MODEL or "gemini-2.5-flash").strip()
+        raw_model = (model or settings.GEMINI_MODEL or "gemini-3.8-flash").strip()
+        active_model = raw_model.removeprefix("models/").strip()
         active_timeout = timeout_seconds or settings.GEMINI_TIMEOUT_SECONDS or 60.0
         super().__init__(name=name, model=active_model, timeout_seconds=active_timeout)
 
@@ -109,11 +107,12 @@ class GeminiProvider(BaseAIProvider):
                 self._model_verified = True
                 return self._resolved_model
 
-            # If user's model is not available or deprecated on v1beta, select compatible Flash model
+            # If user's model is not available or restricted (e.g. gemini-2.5-flash restricted to existing users),
+            # select compatible Flash model from preference list (prioritizing gemini-3.8-flash)
             for candidate in PREFERENCE_MODELS:
                 if candidate in available_models:
                     logger.warning(
-                        "Configured Gemini model '%s' not supported or not found for this key. "
+                        "Configured Gemini model '%s' not supported or not accessible for this key. "
                         "Automatically resolved to verified model '%s'.",
                         self.model,
                         candidate,
@@ -122,7 +121,7 @@ class GeminiProvider(BaseAIProvider):
                     self._model_verified = True
                     return self._resolved_model
 
-            # Fallback to first available flash/gemini model
+            # Fallback to first available flash model
             flash_models = [m for m in available_models if "flash" in m.lower()]
             if flash_models:
                 self._resolved_model = flash_models[0]
@@ -134,11 +133,39 @@ class GeminiProvider(BaseAIProvider):
                 self._model_verified = True
                 return self._resolved_model
 
+            # If model list was returned but empty
+            raise AIEngineError(
+                f"No compatible Gemini models supporting generateContent found for configured model '{self.model}'.",
+                status_code=404,
+                category="invalid_model",
+                provider=self.name,
+            )
+
+        except APIError as exc:
+            code = getattr(exc, "code", 500)
+            msg = str(exc.message or exc)
+            if code in (401, 403) or "API_KEY_INVALID" in msg:
+                raise AIEngineError(
+                    "Google Gemini API authentication failed during model discovery. Verify GEMINI_API_KEY.",
+                    status_code=401,
+                    category="auth_error",
+                    provider=self.name,
+                )
+            elif code == 429 or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
+                raise AIEngineError(
+                    "Google Gemini API quota exceeded during model discovery.",
+                    status_code=429,
+                    category="quota_exhausted",
+                    provider=self.name,
+                )
+            logger.warning("Gemini model listing API error (code %s): %s", code, sanitize_secret_text(msg))
+        except AIEngineError:
+            raise
         except Exception as exc:
-            # Model listing may fail due to permissions, network, or mock clients
+            # Model listing may fail due to network or mock environments
             logger.warning(
                 "Could not dynamically query Gemini models list (%s). Using configured model '%s'.",
-                str(exc),
+                sanitize_secret_text(str(exc)),
                 self.model,
             )
 
@@ -250,17 +277,19 @@ class GeminiProvider(BaseAIProvider):
             elif (
                 code == 404
                 or "is not found for API version" in msg
-                or "not supported for generateContent" in msg
+                or "not supported for generatecontent" in msg.lower()
+                or "unavailable to new users" in msg.lower()
+                or "gemini-3.8-flash" in msg.lower()
             ):
-                logger.warning("Gemini model not found or not supported: %s", msg)
+                logger.warning("Gemini model not found or not supported: %s", sanitize_secret_text(msg))
                 raise AIEngineError(
-                    f"Gemini model '{model_to_use}' is not supported or not found for API version v1beta: {msg}",
+                    f"Gemini model '{model_to_use}' is not supported or not found: {sanitize_secret_text(msg)}",
                     status_code=404,
                     category="invalid_model",
                     provider=self.name,
                 )
             elif code in (500, 502, 503, 504) or "UNAVAILABLE" in msg:
-                logger.warning("Gemini service unavailable: %s", msg)
+                logger.warning("Gemini service unavailable: %s", sanitize_secret_text(msg))
                 raise AIEngineError(
                     f"Gemini service temporarily unavailable (status {code}).",
                     status_code=503,
@@ -268,9 +297,9 @@ class GeminiProvider(BaseAIProvider):
                     provider=self.name,
                 )
             else:
-                logger.warning("Gemini API error (code %s): %s", code, msg)
+                logger.warning("Gemini API error (code %s): %s", code, sanitize_secret_text(msg))
                 raise AIEngineError(
-                    f"Gemini API error: {msg}",
+                    f"Gemini API error: {sanitize_secret_text(msg)}",
                     status_code=code if isinstance(code, int) and 400 <= code <= 599 else 500,
                     category="invalid_request" if code == 400 else "api_error",
                     provider=self.name,
@@ -278,9 +307,9 @@ class GeminiProvider(BaseAIProvider):
         except AIEngineError:
             raise
         except Exception as exc:
-            logger.error("Unexpected error calling Gemini: %s", exc)
+            logger.error("Unexpected error calling Gemini: %s", sanitize_secret_text(str(exc)))
             raise AIEngineError(
-                f"Unexpected error communicating with Gemini: {str(exc)}",
+                f"Unexpected error communicating with Gemini: {sanitize_secret_text(str(exc))}",
                 status_code=500,
                 category="api_error",
                 provider=self.name,
@@ -315,11 +344,19 @@ class GeminiProvider(BaseAIProvider):
             code = getattr(exc, "code", 500)
             msg = str(exc.message or exc)
             if code == 429 or "RESOURCE_EXHAUSTED" in msg or "quota" in msg.lower():
-                return "quota_exhausted", f"Gemini quota exhausted: {msg}"
+                return "quota_exhausted", f"Gemini quota exhausted: {sanitize_secret_text(msg)}"
             elif code in (401, 403) or "API_KEY_INVALID" in msg:
                 return "auth_error", "Invalid GEMINI_API_KEY. Verify credentials."
-            elif code == 404 or "is not found for API version" in msg or "not supported for generateContent" in msg:
-                return "invalid_model", f"Gemini model '{self.model}' is not supported or not found: {msg}"
-            return "unavailable", f"Gemini health check error (code {code}): {msg}"
+            elif (
+                code == 404
+                or "is not found for API version" in msg
+                or "not supported for generatecontent" in msg.lower()
+                or "unavailable to new users" in msg.lower()
+                or "gemini-3.8-flash" in msg.lower()
+            ):
+                return "invalid_model", f"Gemini model '{self.model}' is not supported or not available: {sanitize_secret_text(msg)}"
+            return "unavailable", f"Gemini health check error (code {code}): {sanitize_secret_text(msg)}"
+        except AIEngineError as exc:
+            return exc.category, exc.message
         except Exception as exc:
-            return "unavailable", f"Gemini health check failed: {str(exc)}"
+            return "unavailable", f"Gemini health check failed: {sanitize_secret_text(str(exc))}"

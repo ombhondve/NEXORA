@@ -892,3 +892,141 @@ class TestAIAnalysisServiceGroundingAndSecurity:
         assert exc_info.value.status_code == 500
         assert exc_info.value.category == "database_error"
         session.rollback.assert_called()
+
+
+class TestProductionRepairScenarios:
+    """Tests for Production Repair requirements: Gemini-3.8-Flash, Groq normalization, secret sanitization, and health reporting."""
+
+    @pytest.mark.asyncio
+    async def test_gemini_resolves_gemini_3_8_flash_when_configured_model_unavailable(self):
+        from recursive_osint.ai.providers.gemini_provider import GeminiProvider
+
+        # User configured gemini-2.5-flash (which is restricted to existing users on API tier)
+        provider = GeminiProvider(api_key="AIzaSyTestKeyValid123", model="gemini-2.5-flash")
+
+        # Models API returns gemini-3.8-flash as the active Flash model supporting generateContent
+        mock_m1 = MagicMock()
+        mock_m1.name = "models/gemini-3.8-flash"
+        mock_m1.supported_actions = ["generateContent"]
+
+        class AsyncPagerMock:
+            def __aiter__(self):
+                return self
+            def __init__(self):
+                self._items = [mock_m1]
+                self._idx = 0
+            async def __anext__(self):
+                if self._idx < len(self._items):
+                    item = self._items[self._idx]
+                    self._idx += 1
+                    return item
+                raise StopAsyncIteration
+
+        mock_client = MagicMock()
+        mock_client.aio.models.list = AsyncMock(return_value=AsyncPagerMock())
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "gemini-3.8-flash"
+
+    def test_groq_normalizes_percent_encoded_model(self):
+        from recursive_osint.ai.providers.groq_provider import GroqProvider, normalize_groq_model_id
+
+        # URL-encoded slash from misconfigured env variable
+        normalized = normalize_groq_model_id("openai%2Fgpt-oss-120b")
+        assert normalized == "openai/gpt-oss-120b"
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="openai%2Fgpt-oss-120b")
+        assert provider.model == "openai/gpt-oss-120b"
+
+    @pytest.mark.asyncio
+    async def test_groq_health_check_uses_models_list_and_handles_slashes(self):
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="openai/gpt-oss-120b")
+
+        mock_client = MagicMock()
+        mock_client.models.list = AsyncMock(return_value=MagicMock(data=[MagicMock(id="openai/gpt-oss-120b")]))
+        mock_client.models.retrieve = MagicMock()  # Must NOT be called
+        provider._client = mock_client
+
+        status, details = await provider.check_health()
+        assert status == "ready"
+        assert "openai/gpt-oss-120b" in details
+        # Verify models.retrieve was NEVER called (avoiding URL-encoding slash bug)
+        mock_client.models.retrieve.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_groq_filters_out_audio_and_guard_models(self):
+        from recursive_osint.ai.providers.groq_provider import GroqProvider
+
+        provider = GroqProvider(api_key="gsk_test_valid_key_123", model="non-existent-model")
+
+        # Catalog contains audio/guard models and one valid text generation model
+        mock_models = [
+            MagicMock(id="whisper-large-v3"),
+            MagicMock(id="distil-whisper-large-v3-en"),
+            MagicMock(id="llama-guard-3-8b"),
+            MagicMock(id="openai/gpt-oss-120b"),
+        ]
+        mock_client = MagicMock()
+        mock_client.models.list = AsyncMock(return_value=MagicMock(data=mock_models))
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "openai/gpt-oss-120b"
+
+    def test_secret_sanitization_in_errors(self):
+        from recursive_osint.ai.errors import AIEngineError, sanitize_secret_text
+
+        raw = "Auth failed with key AIzaSyD9876543210ABCDEF and secret gsk_1234567890abcdefghijklmn"
+        sanitized = sanitize_secret_text(raw)
+
+        assert "AIzaSyD9876543210ABCDEF" not in sanitized
+        assert "gsk_1234567890abcdefghijklmn" not in sanitized
+        assert "[REDACTED_GEMINI_KEY]" in sanitized
+        assert "[REDACTED_GROQ_KEY]" in sanitized
+
+        err = AIEngineError(f"API key leaked: AIzaSyA1B2C3D4E5F6G7H8")
+        assert "AIzaSy" not in err.message
+        assert "[REDACTED_GEMINI_KEY]" in err.message
+
+    @pytest.mark.asyncio
+    async def test_provider_manager_switches_on_invalid_model_without_retry_loop(self):
+        gemini = FakeProvider("gemini", "gemini-2.5-flash", fail_with_category="invalid_model", fail_status_code=404)
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
+        manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
+
+        res = await manager.chat([{"role": "user", "content": "analyze"}])
+        assert res["provider"] == "groq"
+        assert gemini.call_count == 1
+        assert groq.call_count == 1
+        assert manager.state["gemini"].status == "invalid_model"
+        assert manager.state["gemini"].is_in_cooldown
+
+        # Second chat request should NOT retry Gemini due to invalid_model cooldown
+        res2 = await manager.chat([{"role": "user", "content": "analyze 2"}])
+        assert res2["provider"] == "groq"
+        assert gemini.call_count == 1  # Unchanged!
+        assert groq.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_provider_manager_health_reporting_and_fallback_active(self):
+        gemini = FakeProvider("gemini", "gemini-3.8-flash", fail_with_category="invalid_model")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b")
+        manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
+
+        status, details = await manager.check_health()
+        assert status == "fallback_active"
+        assert "Groq fallback is active" in details
+
+    @pytest.mark.asyncio
+    async def test_provider_manager_health_both_misconfigured(self):
+        gemini = FakeProvider("gemini", "gemini-3.8-flash", fail_with_category="invalid_model")
+        groq = FakeProvider("groq", "openai/gpt-oss-120b", fail_with_category="invalid_model")
+        manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
+
+        status, details = await manager.check_health()
+        assert status == "configuration_error"
+        assert "Both AI providers misconfigured" in details
+

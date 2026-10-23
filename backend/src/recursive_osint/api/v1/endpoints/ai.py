@@ -47,6 +47,8 @@ async def check_ai_health():
         primary_provider="gemini",
         fallback_provider="groq",
         details=details,
+        gemini_configured=manager.gemini.is_configured,
+        groq_configured=manager.groq.is_configured,
         gemini_status=manager.state["gemini"].status,
         groq_status=manager.state["groq"].status,
     )

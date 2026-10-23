@@ -111,7 +111,9 @@ class AIProviderManager:
 
     @property
     def active_model(self) -> str:
-        """Returns the currently expected primary model name."""
+        """Returns the currently active model name based on provider routing."""
+        if self.active_provider_name == "groq":
+            return self.groq.model
         return self.gemini.model
 
     @property
@@ -357,8 +359,12 @@ class AIProviderManager:
             return "quota_exhausted", "Both Gemini and Groq usage quotas are temporarily exhausted."
         elif gemini_status == "rate_limited" or groq_status == "rate_limited":
             return "rate_limited", f"AI providers are temporarily rate-limited. Gemini: {gemini_status}, Groq: {groq_status}."
-        elif gemini_status in ("invalid_model", "auth_error") and not groq_configured:
+        elif gemini_status in ("invalid_model", "auth_error", "configuration_error") and groq_status in ("invalid_model", "auth_error", "configuration_error"):
+            return "configuration_error", f"Both AI providers misconfigured. Gemini: [{gemini_status}] {gemini_details}; Groq: [{groq_status}] {groq_details}."
+        elif gemini_status in ("invalid_model", "auth_error", "configuration_error") and not groq_configured:
             return "configuration_error", f"Gemini configuration error: {gemini_details}. Groq fallback is not configured."
+        elif groq_status in ("invalid_model", "auth_error", "configuration_error") and not gemini_configured:
+            return "configuration_error", f"Groq configuration error: {groq_details}. Gemini primary is not configured."
         else:
             return "unavailable", f"AI providers unavailable. Gemini: [{gemini_status}] {gemini_details}; Groq: [{groq_status}] {groq_details}."
 

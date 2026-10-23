@@ -330,7 +330,7 @@ class AIAnalysisService:
 
         analysis = AIInvestigationAnalysis(
             investigation_id=investigation_id,
-            model_name=res.get("model", getattr(self.client, "model", getattr(self.client, "active_model", "gemini-1.5-flash"))),
+            model_name=res.get("model", getattr(self.client, "model", getattr(self.client, "active_model", "gemini-3.8-flash"))),
             objective=data.get("objective", f"Analyze OSINT findings for: {target_clue}"),
             executive_summary=data.get("executive_summary", "Analysis completed."),
             key_findings=key_findings,

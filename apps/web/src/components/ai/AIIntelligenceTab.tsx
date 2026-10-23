@@ -55,9 +55,13 @@ export function AIIntelligenceTab({
           setProviderHealth({
             status: 'unavailable',
             provider: 'gemini',
-            model: 'gemini-1.5-flash',
+            model: 'gemini-3.8-flash',
             primary_provider: 'gemini',
             fallback_provider: 'groq',
+            gemini_configured: false,
+            groq_configured: false,
+            gemini_status: 'unavailable',
+            groq_status: 'unavailable',
             details: 'AI health endpoint unreachable.',
           });
         }
@@ -78,8 +82,8 @@ export function AIIntelligenceTab({
       }
     } catch (err: any) {
       console.error('AI analysis error:', err);
-      const msg = err?.message || 'Failed to complete AI analysis.';
-      setError(msg);
+      const rawMsg = err?.message || 'Failed to complete AI analysis.';
+      setError(sanitizeClientText(rawMsg));
       // Notice: previous successful analysis is preserved in state and not discarded!
     } finally {
       setLoading(false);
@@ -95,31 +99,55 @@ export function AIIntelligenceTab({
         return `${providerHealth.provider === 'gemini' ? 'Gemini' : 'Groq'} active`;
       case 'fallback_active': {
         const gem = providerHealth.gemini_status;
-        if (gem === 'invalid_model') return 'Groq active — Gemini model error';
-        if (gem === 'auth_error') return 'Groq active — Gemini auth error';
-        if (gem === 'rate_limited') return 'Groq active — Gemini rate-limited';
-        return 'Groq active — Gemini quota reached';
+        if (gem === 'invalid_model') return 'Groq fallback active — Gemini model error';
+        if (gem === 'auth_error') return 'Groq fallback active — Gemini auth error';
+        if (gem === 'rate_limited') return 'Groq fallback active — Gemini rate-limited';
+        return 'Groq fallback active — Gemini quota reached';
       }
       case 'rate_limited':
-        return 'Temporarily rate-limited';
+        return 'Provider rate-limited';
       case 'quota_exhausted':
         return 'All AI quotas exhausted';
       case 'configuration_error':
         if (providerHealth.gemini_status === 'invalid_model') {
-          return 'Gemini model unsupported';
+          return 'Gemini model configuration error';
+        }
+        if (providerHealth.groq_status === 'invalid_model') {
+          return 'Groq model configuration error';
         }
         if (providerHealth.gemini_status === 'auth_error') {
           return 'Gemini auth invalid';
         }
-        return 'AI configuration required';
+        return 'AI configuration error';
       case 'disabled':
         return 'AI disabled';
       default:
         if (providerHealth.gemini_status === 'invalid_model') {
-          return 'Gemini model unsupported';
+          return 'Gemini model configuration error';
         }
-        return 'AI providers temporarily unavailable';
+        if (providerHealth.groq_status === 'invalid_model') {
+          return 'Groq model configuration error';
+        }
+        return 'Both providers unavailable';
     }
+  };
+
+  const sanitizeClientText = (text: string): string => {
+    if (!text) return '';
+    return text
+      .replace(/AIza[0-9A-Za-z\-_]{5,}/gi, '[REDACTED_GEMINI_KEY]')
+      .replace(/gsk_[0-9A-Za-z\-_]{5,}/gi, '[REDACTED_GROQ_KEY]')
+      .replace(/Bearer\s+[A-Za-z0-9\-_\.]{10,}/gi, 'Bearer [REDACTED_TOKEN]');
+  };
+
+  const formatProviderStatus = (st?: string): string => {
+    if (!st || st === 'unconfigured') return 'Not Configured';
+    if (st === 'ready') return 'Ready';
+    if (st === 'invalid_model') return 'Invalid Model';
+    if (st === 'auth_error') return 'Invalid Credentials';
+    if (st === 'quota_exhausted') return 'Quota Exhausted';
+    if (st === 'rate_limited') return 'Rate-Limited';
+    return 'Unavailable';
   };
 
   return (
@@ -134,7 +162,7 @@ export function AIIntelligenceTab({
             <div className="flex items-center space-x-2">
               <h2 className="text-sm font-bold text-white">AI Evidence Intelligence</h2>
               <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/30">
-                {providerHealth?.model || 'gemini-2.5-flash'} @ {providerHealth?.provider || 'Gemini'}
+                {providerHealth?.model || 'gemini-3.8-flash'} @ {providerHealth?.provider || 'Gemini'}
               </span>
               {providerHealth && (
                 <span
@@ -190,29 +218,54 @@ export function AIIntelligenceTab({
           </div>
           <p className="text-[11px] leading-relaxed">{error}</p>
 
-          {(error.includes('GEMINI_API_KEY') || error.includes('GROQ_API_KEY') || error.includes('No AI provider credentials') || error.includes('configuration')) && (
-            <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2 text-[10px] text-slate-300">
-              <div className="font-bold text-cyber-cyan flex items-center gap-1.5">
-                <span>Configured AI Architecture:</span>
-                <span className="text-slate-400">Google Gemini (Primary) + Groq (Automatic Fallback)</span>
+          {/* Sanitized Provider Status Grid */}
+          <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2.5 text-[11px] text-slate-300">
+            <div className="font-bold text-cyber-cyan flex items-center justify-between">
+              <span>Configured AI Architecture Status</span>
+              <span className="text-slate-400 font-normal">Gemini (Primary) + Groq (Fallback)</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px] pt-1">
+              <div className="p-2.5 rounded bg-slate-950/80 border border-slate-800 space-y-1">
+                <div className="text-slate-400 font-semibold uppercase">Google Gemini (Primary)</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Configured:</span>
+                  <span className={providerHealth?.gemini_configured ? "text-emerald-400 font-bold" : "text-amber-400"}>
+                    {providerHealth?.gemini_configured ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Status:</span>
+                  <span className="text-slate-200">
+                    {formatProviderStatus(providerHealth?.gemini_status)}
+                  </span>
+                </div>
               </div>
-              <p className="text-slate-400">
-                To enable AI analysis, set <code className="text-cyber-cyan font-bold">GEMINI_API_KEY</code> and optionally <code className="text-cyber-emerald font-bold">GROQ_API_KEY</code> in your environment variables.
-              </p>
-              <div className="font-mono text-slate-400 bg-slate-950 p-2 rounded border border-cyber-border/50 text-[10px] space-y-1">
-                <div>GEMINI_API_KEY=AIzaSy...</div>
-                <div>GROQ_API_KEY=gsk_...</div>
+
+              <div className="p-2.5 rounded bg-slate-950/80 border border-slate-800 space-y-1">
+                <div className="text-slate-400 font-semibold uppercase">Groq (Fallback)</div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Configured:</span>
+                  <span className={providerHealth?.groq_configured ? "text-emerald-400 font-bold" : "text-amber-400"}>
+                    {providerHealth?.groq_configured ? "Yes" : "No"}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Status:</span>
+                  <span className="text-slate-200">
+                    {formatProviderStatus(providerHealth?.groq_status)}
+                  </span>
+                </div>
               </div>
             </div>
-          )}
+          </div>
 
-          {(error.includes('not supported') || error.includes('not found') || error.includes('v1beta') || error.includes('invalid_model')) && (
-            <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2 text-[10px] text-slate-300">
+          {(error.includes('not supported') || error.includes('not found') || error.includes('unavailable to new users') || error.includes('invalid_model')) && (
+            <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-1.5 text-[10px] text-slate-300">
               <div className="font-bold text-amber-300 flex items-center gap-1.5">
-                <span>Gemini Model Guidance:</span>
+                <span>Model Resolution Guidance:</span>
               </div>
               <p className="text-slate-300">
-                The configured Gemini model is not supported on the active API tier. Set <code className="text-cyber-cyan font-bold">GEMINI_MODEL=gemini-2.5-flash</code> in your environment variables.
+                Recommended active model for Google Gemini is <code className="text-cyber-cyan font-bold">gemini-3.8-flash</code> and for Groq is <code className="text-cyber-emerald font-bold">openai/gpt-oss-120b</code>.
               </p>
             </div>
           )}
@@ -248,7 +301,7 @@ export function AIIntelligenceTab({
           <RefreshCw className="w-8 h-8 animate-spin mx-auto text-cyber-cyan" />
           <p className="text-white font-bold text-sm">Evaluating OSINT Evidence Passages...</p>
           <p className="text-slate-400 text-[11px] max-w-md mx-auto">
-            Extracting entities, validating source citations, and mapping relational candidates using {providerHealth?.model || 'gemini-1.5-flash'}.
+            Extracting entities, validating source citations, and mapping relational candidates using {providerHealth?.model || 'gemini-3.8-flash'}.
           </p>
         </div>
       )}

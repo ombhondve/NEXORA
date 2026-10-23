@@ -2,15 +2,16 @@
 Groq AI Provider for NEXORA.
 Implements secondary / fallback AI model generation using the official groq SDK.
 Supports dynamic model verification against Groq's catalog, structured JSON output,
-timeout handling, granular error mapping (quota vs auth vs invalid model), and credential security.
+timeout handling, granular error mapping (quota vs auth vs invalid model), URL normalization, and credential security.
 """
 
 import asyncio
 import time
+import urllib.parse
 from typing import Any, Dict, List, Optional, Tuple
 from groq import AsyncGroq, RateLimitError, AuthenticationError, APITimeoutError, APIConnectionError, APIStatusError
 
-from recursive_osint.ai.errors import AIEngineError
+from recursive_osint.ai.errors import AIEngineError, sanitize_secret_text
 from recursive_osint.ai.providers.base import BaseAIProvider
 from recursive_osint.config import settings
 from recursive_osint.core.logging import get_logger
@@ -23,7 +24,34 @@ GROQ_PREFERENCE_MODELS = [
     "openai/gpt-oss-20b",
     "qwen/qwen3.8-27b",
     "meta-models/muse-spark-open",
+    "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
 ]
+
+
+def normalize_groq_model_id(raw_model: Optional[str]) -> str:
+    """
+    Normalizes a Groq model ID by trimming whitespace and decoding accidental
+    percent-encoding exactly once (e.g. 'openai%2Fgpt-oss-120b' -> 'openai/gpt-oss-120b').
+    """
+    if not raw_model:
+        return "openai/gpt-oss-120b"
+    trimmed = str(raw_model).strip()
+    if "%" in trimmed:
+        try:
+            trimmed = urllib.parse.unquote(trimmed)
+        except Exception:
+            pass
+    return trimmed.strip()
+
+
+def is_suitable_text_model(model_id: str) -> bool:
+    """
+    Filters out models not suitable for text/chat generation such as audio, safeguard, and embedding models.
+    """
+    mid = model_id.lower()
+    unsuitable = ("whisper", "guard", "safeguard", "embedding", "moderation", "tts")
+    return not any(u in mid for u in unsuitable)
 
 
 class GroqProvider(BaseAIProvider):
@@ -36,7 +64,7 @@ class GroqProvider(BaseAIProvider):
         timeout_seconds: Optional[float] = None,
     ):
         name = "groq"
-        active_model = (model or settings.GROQ_MODEL or "openai/gpt-oss-120b").strip()
+        active_model = normalize_groq_model_id(model or settings.GROQ_MODEL or "openai/gpt-oss-120b")
         active_timeout = timeout_seconds or settings.GROQ_TIMEOUT_SECONDS or 60.0
         super().__init__(name=name, model=active_model, timeout_seconds=active_timeout)
 
@@ -65,8 +93,8 @@ class GroqProvider(BaseAIProvider):
     async def resolve_working_model(self) -> str:
         """
         Verifies the configured Groq model against the account's active model catalog.
-        If the configured model is available, returns it.
-        Otherwise, automatically resolves to a verified candidate (e.g. openai/gpt-oss-120b).
+        Normalizes the model ID, checks client.models.list(), ensures the model is suitable
+        for text generation, and falls back to verified supported candidates if necessary.
         """
         if self._resolved_model and self._model_verified:
             return self._resolved_model
@@ -75,12 +103,18 @@ class GroqProvider(BaseAIProvider):
             return self.model
 
         client = self._get_client()
-        configured_target = self.model.strip()
+        configured_target = normalize_groq_model_id(self.model)
 
         try:
             model_list_resp = await client.models.list()
-            available_ids = [getattr(m, "id", "") for m in getattr(model_list_resp, "data", []) if getattr(m, "id", "")]
-            logger.info("Groq model discovery: retrieved %d available models for this account", len(available_ids))
+            raw_data = getattr(model_list_resp, "data", []) or []
+            available_ids = [getattr(m, "id", "") for m in raw_data if getattr(m, "id", "")]
+            suitable_models = [mid for mid in available_ids if is_suitable_text_model(mid)]
+            logger.info(
+                "Groq model discovery: retrieved %d available models (%d suitable for text generation)",
+                len(available_ids),
+                len(suitable_models),
+            )
 
             # If user's configured model is in available_ids, use it
             if configured_target in available_ids:
@@ -94,24 +128,57 @@ class GroqProvider(BaseAIProvider):
                     logger.warning(
                         "Configured Groq model '%s' is not accessible for this account. "
                         "Automatically resolved to verified model '%s'.",
-                        self.model,
+                        configured_target,
                         cand,
                     )
                     self._resolved_model = cand
                     self._model_verified = True
                     return self._resolved_model
 
-            if available_ids:
-                # Use first active model
-                self._resolved_model = available_ids[0]
+            # If other suitable text generation models exist
+            if suitable_models:
+                self._resolved_model = suitable_models[0]
                 self._model_verified = True
                 return self._resolved_model
 
+            # If catalog is returned but no suitable text generation models found
+            if available_ids:
+                raise AIEngineError(
+                    f"No compatible text generation models found in Groq catalog for configured model '{configured_target}'.",
+                    status_code=404,
+                    category="invalid_model",
+                    provider=self.name,
+                )
+            else:
+                raise AIEngineError(
+                    f"Groq API returned an empty model catalog. Model '{configured_target}' could not be verified.",
+                    status_code=404,
+                    category="invalid_model",
+                    provider=self.name,
+                )
+
+        except AuthenticationError:
+            raise AIEngineError(
+                "Groq API authentication failed during model discovery. Verify GROQ_API_KEY.",
+                status_code=401,
+                category="auth_error",
+                provider=self.name,
+            )
+        except RateLimitError as exc:
+            raise AIEngineError(
+                "Groq API rate limit or quota exceeded during model discovery.",
+                status_code=429,
+                category="quota_exhausted",
+                provider=self.name,
+            )
+        except AIEngineError:
+            raise
         except Exception as exc:
+            # Distinguish transient connection failure from confirmed missing model
             logger.warning(
                 "Could not dynamically query Groq models catalog (%s). Using configured model '%s'.",
-                str(exc),
-                self.model,
+                sanitize_secret_text(str(exc)),
+                configured_target,
             )
 
         self._resolved_model = configured_target
@@ -174,7 +241,7 @@ class GroqProvider(BaseAIProvider):
                 provider=self.name,
             )
         except RateLimitError as exc:
-            msg = str(exc)
+            msg = sanitize_secret_text(str(exc))
             logger.warning("Groq rate limit / quota exceeded: %s", msg)
             retry_after = None
             if hasattr(exc, "response") and exc.response and hasattr(exc.response, "headers"):
@@ -190,7 +257,7 @@ class GroqProvider(BaseAIProvider):
                 retry_after=retry_after,
             )
         except AuthenticationError as exc:
-            logger.error("Groq authentication failure: %s", exc)
+            logger.error("Groq authentication failure: %s", sanitize_secret_text(str(exc)))
             raise AIEngineError(
                 "Groq API authentication failed. Verify GROQ_API_KEY.",
                 status_code=401,
@@ -198,7 +265,7 @@ class GroqProvider(BaseAIProvider):
                 provider=self.name,
             )
         except APIConnectionError as exc:
-            logger.warning("Groq connection failure: %s", exc)
+            logger.warning("Groq connection failure: %s", sanitize_secret_text(str(exc)))
             raise AIEngineError(
                 "Cannot connect to Groq API. Check network or internet connectivity.",
                 status_code=503,
@@ -207,7 +274,7 @@ class GroqProvider(BaseAIProvider):
             )
         except APIStatusError as exc:
             code = exc.status_code
-            msg = str(exc)
+            msg = sanitize_secret_text(str(exc))
             # Differentiate invalid/retired model error from quota exhaustion
             if (
                 code == 404
@@ -238,9 +305,9 @@ class GroqProvider(BaseAIProvider):
         except AIEngineError:
             raise
         except Exception as exc:
-            logger.error("Unexpected error calling Groq: %s", exc)
+            logger.error("Unexpected error calling Groq: %s", sanitize_secret_text(str(exc)))
             raise AIEngineError(
-                f"Unexpected error communicating with Groq: {str(exc)}",
+                f"Unexpected error communicating with Groq: {sanitize_secret_text(str(exc))}",
                 status_code=500,
                 category="api_error",
                 provider=self.name,
@@ -248,7 +315,8 @@ class GroqProvider(BaseAIProvider):
 
     async def check_health(self) -> Tuple[str, str]:
         """
-        Validates Groq provider availability.
+        Validates Groq provider availability without using models.retrieve (which URL-encodes slashes).
+        Uses client.models.list() to verify account credentials and catalog membership.
         Returns:
             Tuple of (status, details)
             Status values: 'ready', 'auth_error', 'quota_exhausted', 'rate_limited', 'invalid_model', 'unavailable', 'disabled'
@@ -262,23 +330,37 @@ class GroqProvider(BaseAIProvider):
         client = self._get_client()
         try:
             model_to_check = await self.resolve_working_model()
-            # Retrieve model information to verify key and model validity
-            model_info = await asyncio.wait_for(
-                client.models.retrieve(model_to_check),
+            # Query models.list() to verify key validity and model catalog presence safely
+            model_list_resp = await asyncio.wait_for(
+                client.models.list(),
                 timeout=8.0,
             )
-            return "ready", f"Groq is ready with model '{model_info.id}'."
+            raw_data = getattr(model_list_resp, "data", []) or []
+            available_ids = [getattr(m, "id", "") for m in raw_data if getattr(m, "id", "")]
+
+            if model_to_check not in available_ids:
+                # If model_to_check is not in catalog, check if any preference model is accessible
+                matched = next((c for c in GROQ_PREFERENCE_MODELS if c in available_ids), None)
+                if matched:
+                    self._resolved_model = matched
+                    self._model_verified = True
+                    return "ready", f"Groq is ready with model '{matched}' (configured '{model_to_check}' not found)."
+                return "invalid_model", f"Groq model '{model_to_check}' does not exist or account lacks access."
+
+            return "ready", f"Groq is ready with model '{model_to_check}'."
         except (asyncio.TimeoutError, APITimeoutError):
             return "unavailable", "Groq health probe timed out after 8.0s."
         except RateLimitError as exc:
-            return "quota_exhausted", f"Groq quota exhausted: {str(exc)}"
+            return "quota_exhausted", f"Groq quota exhausted: {sanitize_secret_text(str(exc))}"
         except AuthenticationError:
             return "auth_error", "Invalid GROQ_API_KEY. Verify credentials."
         except APIStatusError as exc:
             code = exc.status_code
-            msg = str(exc)
+            msg = sanitize_secret_text(str(exc))
             if code == 404 or "does not exist" in msg.lower() or "do not have access to it" in msg.lower():
                 return "invalid_model", f"Groq model '{self.model}' does not exist or account lacks access: {msg}"
             return "unavailable", f"Groq health check error (status {code}): {msg}"
+        except AIEngineError as exc:
+            return exc.category, exc.message
         except Exception as exc:
-            return "unavailable", f"Groq health check failed: {str(exc)}"
+            return "unavailable", f"Groq health check failed: {sanitize_secret_text(str(exc))}"
