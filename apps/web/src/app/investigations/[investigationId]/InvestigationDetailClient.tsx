@@ -163,6 +163,17 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
     }
   };
 
+  const handleAIAnalysisComplete = useCallback(async (analysis: AIInvestigationAnalysis) => {
+    setAiAnalysis(analysis);
+    try {
+      const updatedGraph = await api.getLeadGraph(investigationId);
+      setGraph(updatedGraph);
+    } catch (err) {
+      console.warn('Failed to refresh lead graph after AI analysis:', err);
+    }
+  }, [investigationId]);
+
+
   if (loading && !investigation && !isNotFound && !loadError) {
     return (
       <div className="min-h-screen flex flex-col bg-cyber-bg">
@@ -494,6 +505,7 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
               investigationId={investigation.id}
               evidence={evidence}
               initialAnalysis={aiAnalysis}
+              onAnalysisComplete={handleAIAnalysisComplete}
             />
           )}
 

@@ -283,14 +283,15 @@ class RecursiveDiscoveryEngine:
                 self.consecutive_zero_results += 1
 
             # Update progress percent based on queries executed vs budget limit
-            progress = int((self.budget.queries_executed / self.budget.max_total_queries) * 100)
-            self.investigation.progress_percent = min(95, max(self.investigation.progress_percent, progress))
+            progress = min(100, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
+            self.investigation.progress_percent = max(self.investigation.progress_percent, progress)
             await self.session.commit()
 
         # Finalize investigation with truthful status and stop reason
         total_queries = successful_queries + failed_queries
         budget_exhausted = self.budget.queries_executed >= self.budget.max_total_queries
         unexplored_leads_remain = not self.queue.is_empty() or self.investigation.current_depth < self.investigation.max_depth
+        queued_count = self.queue.size
 
         if self.is_cancelled:
             self.investigation.status = "cancelled"
@@ -305,14 +306,16 @@ class RecursiveDiscoveryEngine:
             self.investigation.status = "partial"
             self.investigation.stop_reason = (
                 f"Query budget exhausted ({self.budget.queries_executed}/{self.budget.max_total_queries}) "
-                f"at depth {self.investigation.current_depth}/{self.investigation.max_depth}. Unexplored leads remain."
+                f"at depth {self.investigation.current_depth}/{self.investigation.max_depth}. "
+                f"Unexplored leads remain in queue ({queued_count} leads pending)."
             )
-            self.investigation.progress_percent = min(95, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
+            # Budget utilization is calculated from queries executed vs max total queries (consistent with 20/20 = 100%)
+            self.investigation.progress_percent = min(100, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
             await self.emit_event("investigation_partial", f"Investigation paused by query budget limit: {self.investigation.stop_reason}")
         elif failed_queries > 0 and successful_queries > 0:
             self.investigation.status = "partial"
             self.investigation.stop_reason = stop_reason or f"Completed with partial source coverage ({len(providers_succeeded)} connectors active, {len(providers_failed)} failed)."
-            self.investigation.progress_percent = min(95, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
+            self.investigation.progress_percent = min(100, int((self.budget.queries_executed / self.budget.max_total_queries) * 100))
             await self.emit_event("investigation_partial", f"Investigation finalized with partial coverage. Stop reason: {self.investigation.stop_reason}")
         else:
             self.investigation.status = "completed"

@@ -286,39 +286,78 @@ class InvestigationService:
             ai_res = await self.session.execute(stmt)
             latest_ai = ai_res.scalar_one_or_none()
             if latest_ai and latest_ai.relationships_json:
-                # Build lookup mapping lowercase label to node id
-                node_label_to_id = {node.label.lower(): node.id for node in nodes}
+                # Build canonical lookup mapping node IDs, labels, and normalized values
+                node_lookup: dict[str, str] = {}
+                for node in nodes:
+                    node_lookup[node.id.lower()] = node.id
+                    node_lookup[node.label.strip().lower()] = node.id
+                    if "normalized_value" in node.metadata:
+                        node_lookup[str(node.metadata["normalized_value"]).strip().lower()] = node.id
+
+                evidence_id_set = {e.id for e in evidence_items}
+                ev_map_by_id = {e.id: e for e in evidence_items}
 
                 for ai_rel in latest_ai.relationships_json:
-                    src_name = str(ai_rel.get("source_entity", "")).strip().lower()
-                    tgt_name = str(ai_rel.get("target_entity", "")).strip().lower()
-                    rel_type = ai_rel.get("relationship_type", "associated_with")
-                    evidence_ids = ai_rel.get("evidence_ids", [])
-                    explanation = ai_rel.get("explanation", "AI contextual correlation")
-                    confidence = float(ai_rel.get("confidence", 0.65))
-                    rel_kind = ai_rel.get("relationship_kind", "inferred")
+                    src_raw = str(ai_rel.get("source_entity", "")).strip().lower()
+                    tgt_raw = str(ai_rel.get("target_entity", "")).strip().lower()
+                    rel_type = str(ai_rel.get("relationship_type", "associated_with")).strip()
+                    explanation = str(ai_rel.get("explanation", "AI contextual correlation")).strip()
+                    raw_confidence = ai_rel.get("confidence", 0.65)
+                    try:
+                        confidence = max(0.0, min(1.0, float(raw_confidence)))
+                    except (ValueError, TypeError):
+                        confidence = 0.65
 
-                    src_node_id = node_label_to_id.get(src_name)
-                    tgt_node_id = node_label_to_id.get(tgt_name)
+                    # Resolve to actual canonical node IDs
+                    src_node_id = node_lookup.get(src_raw)
+                    tgt_node_id = node_lookup.get(tgt_raw)
 
-                    if src_node_id and tgt_node_id and src_node_id != tgt_node_id:
-                        edge_key = (src_node_id, tgt_node_id, rel_type)
-                        if edge_key not in seen_edge_keys:
-                            primary_ev_id = evidence_ids[0] if evidence_ids else None
-                            edges.append(
-                                GraphEdge(
-                                    id=f"ai_edge:{src_node_id}->{tgt_node_id}:{rel_type}",
-                                    source=src_node_id,
-                                    target=tgt_node_id,
-                                    label=rel_type,
-                                    confidence=confidence,
-                                    relationship_kind=rel_kind,
-                                    evidence_id=primary_ev_id,
-                                    confidence_rationale=f"AI Inferred: {explanation}",
-                                    origin="ai_inferred",
-                                )
+                    # Strictly verify that endpoints resolve to existent canonical graph nodes
+                    if not src_node_id or not tgt_node_id or src_node_id not in seen_node_ids or tgt_node_id not in seen_node_ids:
+                        continue
+                    if src_node_id == tgt_node_id:
+                        continue
+
+                    # Validate AI relationship evidence citations against actual investigation evidence
+                    raw_ev_ids = ai_rel.get("evidence_ids", [])
+                    valid_ev_ids = [eid for eid in raw_ev_ids if eid in evidence_id_set] if isinstance(raw_ev_ids, list) else []
+                    primary_ev_id = valid_ev_ids[0] if valid_ev_ids else None
+                    primary_ev = ev_map_by_id.get(primary_ev_id) if primary_ev_id else None
+
+                    # Do not treat AI relationship as directly verified purely based on high confidence
+                    raw_kind = str(ai_rel.get("relationship_kind", "inferred")).lower().strip()
+                    if raw_kind == "direct" and not (primary_ev and getattr(primary_ev, "is_verified_source_statement", False)):
+                        rel_kind = "inferred"
+                    elif raw_kind in ("direct", "inferred", "unverified"):
+                        rel_kind = raw_kind
+                    else:
+                        rel_kind = "inferred"
+
+                    # Edge deduplication: do not duplicate overlapping deterministic or existing edges
+                    edge_key = (src_node_id, tgt_node_id, rel_type)
+                    reverse_key = (tgt_node_id, src_node_id, rel_type)
+                    if edge_key not in seen_edge_keys and reverse_key not in seen_edge_keys:
+                        # Extract source URL and title from referenced evidence record
+                        source_doc = doc_map.get(primary_ev.document_id) if primary_ev and primary_ev.document_id else None
+                        source_url = source_doc.url if source_doc else getattr(primary_ev, "source_url", None)
+                        evidence_title = primary_ev.title if primary_ev else (source_doc.title if source_doc else None)
+
+                        edges.append(
+                            GraphEdge(
+                                id=f"ai_edge:{src_node_id}->{tgt_node_id}:{rel_type}",
+                                source=src_node_id,
+                                target=tgt_node_id,
+                                label=rel_type,
+                                confidence=confidence,
+                                relationship_kind=rel_kind,
+                                evidence_id=primary_ev_id,
+                                evidence_title=evidence_title,
+                                source_url=source_url,
+                                confidence_rationale=f"AI Inferred ({confidence * 100:.0f}%): {explanation}",
+                                origin="ai_inferred",
                             )
-                            seen_edge_keys.add(edge_key)
+                        )
+                        seen_edge_keys.add(edge_key)
         except Exception:
             pass  # Fail gracefully without blocking deterministic graph
 

@@ -40,7 +40,15 @@ class ApiClient {
       let errorMsg = `HTTP Error ${res.status}`;
       try {
         const data = await res.json();
-        errorMsg = data.message || data.detail || errorMsg;
+        if (typeof data.message === 'string' && data.message.trim()) {
+          errorMsg = data.message;
+        } else if (data.detail) {
+          if (typeof data.detail === 'string') {
+            errorMsg = data.detail;
+          } else if (typeof data.detail === 'object' && data.detail.message) {
+            errorMsg = data.detail.message;
+          }
+        }
       } catch (_) {}
       throw new Error(errorMsg);
     }

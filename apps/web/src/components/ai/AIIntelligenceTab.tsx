@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AIInvestigationAnalysis,
   EvidenceRecord,
+  AIHealthResponse,
 } from '@/types';
 import { api } from '@/lib/api-client';
 import {
@@ -18,6 +19,8 @@ import {
   ChevronRight,
   Layers,
   ArrowRight,
+  Wifi,
+  WifiOff,
 } from 'lucide-react';
 
 interface AIIntelligenceTabProps {
@@ -25,6 +28,7 @@ interface AIIntelligenceTabProps {
   evidence: EvidenceRecord[];
   initialAnalysis?: AIInvestigationAnalysis | null;
   onSelectEvidence?: (evidenceId: string) => void;
+  onAnalysisComplete?: (analysis: AIInvestigationAnalysis) => void;
 }
 
 export function AIIntelligenceTab({
@@ -32,10 +36,35 @@ export function AIIntelligenceTab({
   evidence,
   initialAnalysis,
   onSelectEvidence,
+  onAnalysisComplete,
 }: AIIntelligenceTabProps) {
   const [analysis, setAnalysis] = useState<AIInvestigationAnalysis | null>(initialAnalysis || null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [providerHealth, setProviderHealth] = useState<AIHealthResponse | null>(null);
+
+  // Safely check AI provider readiness on mount
+  useEffect(() => {
+    let mounted = true;
+    api.getAIHealth()
+      .then((health) => {
+        if (mounted) setProviderHealth(health);
+      })
+      .catch(() => {
+        if (mounted) {
+          setProviderHealth({
+            status: 'unreachable',
+            provider: 'ollama',
+            model: 'qwen3:4b',
+            ollama_base_url: 'unconfigured',
+            details: 'AI health endpoint unreachable.',
+          });
+        }
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleRunAnalysis = async () => {
     setLoading(true);
@@ -43,16 +72,20 @@ export function AIIntelligenceTab({
     try {
       const result = await api.analyzeInvestigation(investigationId);
       setAnalysis(result);
+      if (onAnalysisComplete) {
+        onAnalysisComplete(result);
+      }
     } catch (err: any) {
       console.error('AI analysis error:', err);
-      setError(
-        err?.message ||
-          'Failed to run AI analysis. Ensure Ollama is running locally with qwen3:4b (http://localhost:11434).'
-      );
+      const msg = err?.message || 'Failed to complete AI analysis.';
+      setError(msg);
+      // Notice: previous successful analysis is preserved in state and not discarded!
     } finally {
       setLoading(false);
     }
   };
+
+  const isProviderReady = providerHealth?.status === 'ready';
 
   return (
     <div className="space-y-6 font-mono text-xs">
@@ -66,8 +99,27 @@ export function AIIntelligenceTab({
             <div className="flex items-center space-x-2">
               <h2 className="text-sm font-bold text-white">AI Evidence Intelligence</h2>
               <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/30">
-                qwen3:4b @ Ollama
+                {providerHealth?.model || 'qwen3:4b'} @ {providerHealth?.provider || 'Ollama'}
               </span>
+              {providerHealth && (
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border ${
+                    providerHealth.status === 'ready'
+                      ? 'bg-emerald-950/80 text-emerald-400 border-emerald-600/40'
+                      : providerHealth.status === 'disabled'
+                      ? 'bg-slate-900 text-slate-400 border-slate-700'
+                      : 'bg-amber-950/80 text-amber-300 border-amber-600/40'
+                  }`}
+                  title={providerHealth.details}
+                >
+                  {providerHealth.status === 'ready' ? (
+                    <Wifi className="w-3 h-3 text-emerald-400" />
+                  ) : (
+                    <WifiOff className="w-3 h-3 text-amber-400" />
+                  )}
+                  <span className="capitalize">{providerHealth.status.replace('_', ' ')}</span>
+                </span>
+              )}
             </div>
             <p className="text-slate-400 text-[11px] mt-0.5">
               Grounded OSINT summarization, contextual entity extraction, and relationship discovery
@@ -99,27 +151,41 @@ export function AIIntelligenceTab({
         <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/30 text-rose-300 space-y-2">
           <div className="flex items-center space-x-2 font-bold">
             <AlertTriangle className="w-4 h-4 text-rose-400" />
-            <span>AI Inference Notice</span>
+            <span>AI Intelligence Notice</span>
           </div>
           <p className="text-[11px] leading-relaxed">{error}</p>
-          <div className="pt-2">
+          <div className="pt-2 flex items-center space-x-3">
             <button
               onClick={handleRunAnalysis}
-              className="px-3 py-1 rounded bg-rose-900/60 border border-rose-700 text-white hover:bg-rose-800 transition-colors"
+              disabled={loading}
+              className="px-3 py-1 rounded bg-rose-900/60 border border-rose-700 text-white hover:bg-rose-800 transition-colors disabled:opacity-50"
             >
               Retry Analysis
             </button>
+            {analysis && (
+              <span className="text-[10px] text-slate-400">
+                (Previously synthesized analysis remains available below)
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {/* Loading Placeholder */}
+      {/* Loading Placeholder for re-analysis */}
+      {loading && analysis && (
+        <div className="p-3 rounded-lg border border-cyber-cyan/30 bg-cyber-card/40 flex items-center space-x-3 text-cyber-cyan">
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span className="text-[11px]">Re-synthesizing intelligence findings from updated evidence records...</span>
+        </div>
+      )}
+
+      {/* Loading Placeholder for initial analysis */}
       {loading && !analysis && (
         <div className="glass-panel p-10 rounded-xl border border-cyber-border text-center space-y-3">
           <RefreshCw className="w-8 h-8 animate-spin mx-auto text-cyber-cyan" />
           <p className="text-white font-bold text-sm">Evaluating OSINT Evidence Passages...</p>
           <p className="text-slate-400 text-[11px] max-w-md mx-auto">
-            Extracting entities, validating source citations, and mapping relational candidates using local Ollama (qwen3:4b).
+            Extracting entities, validating source citations, and mapping relational candidates using {providerHealth?.model || 'qwen3:4b'}.
           </p>
         </div>
       )}

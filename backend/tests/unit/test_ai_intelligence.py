@@ -328,3 +328,176 @@ class TestAIAnalysisService:
         # Verify passage was XML-escaped
         assert "&lt;tag&gt;override&lt;/tag&gt;" in user_message
         assert "<evidence id=\"ev-malicious\"" in user_message
+
+    @pytest.mark.asyncio
+    async def test_serverless_localhost_diagnostic(self):
+        """Verifies that cloud/serverless environment targeting localhost returns clear configuration error."""
+        with patch("recursive_osint.ai.ollama_client.is_serverless_environment", return_value=True):
+            client = OllamaClient(base_url="http://localhost:11434", ai_enabled=True)
+            status, details = await client.check_health()
+            assert status == "configuration_error"
+            assert "serverless" in details.lower() or "localhost" in details.lower()
+
+            with pytest.raises(AIEngineError) as exc_info:
+                await client.chat([{"role": "user", "content": "hello"}])
+            assert exc_info.value.status_code == 503
+            assert exc_info.value.category == "configuration_error"
+
+    @pytest.mark.asyncio
+    async def test_invalid_evidence_ids_never_substituted(self):
+        """Verifies that an entity citing invalid evidence IDs is NOT silently attributed to selected_evidence[0]."""
+        session = AsyncMock()
+        mock_client = AsyncMock()
+        service = AIAnalysisService(session, ollama_client=mock_client)
+
+        fake_inv = Investigation(
+            id="inv-citation-test",
+            title="Citation Test",
+            target_clue="test.org",
+            clue_type="domain",
+        )
+        service.inv_repo.get_by_id = AsyncMock(return_value=fake_inv)
+
+        ev1 = EvidenceRecord(
+            id="ev-legit-1",
+            investigation_id="inv-citation-test",
+            title="Real Source",
+            extracted_passage="Legitimate passage for analysis with enough length to qualify.",
+            relevance_score=0.9,
+            why_included="Valid test passage",
+            is_verified_source_statement=True,
+        )
+        service.evidence_repo.list_by_investigation = AsyncMock(return_value=[ev1])
+
+        # Model hallucinates evidence ID "ev-phantom-99"
+        model_payload = {
+            "objective": "Test",
+            "executive_summary": "Test summary",
+            "key_findings": [],
+            "evidence_summaries": [],
+            "entities": [
+                {
+                    "entity_type": "organization",
+                    "entity_value": "Phantom Corp",
+                    "normalized_value": "phantom corp",
+                    "evidence_ids": ["ev-phantom-99"],  # Invalid!
+                    "context_snippet": "Mentioned somewhere",
+                    "confidence": 0.8,
+                }
+            ],
+            "relationships": [],
+            "conflicts_and_limitations": [],
+            "missing_information": [],
+            "unverified_claims": [],
+        }
+        mock_client.chat = AsyncMock(return_value={"content": json.dumps(model_payload)})
+        mock_client.parse_json_safely = MagicMock(return_value=model_payload)
+        mock_client.model = "qwen3:4b"
+
+        analysis = await service.analyze_investigation("inv-citation-test")
+
+        # Entity evidence_ids must be EMPTY, NOT ["ev-legit-1"]
+        assert len(analysis.entities) == 1
+        assert analysis.entities[0].evidence_ids == []
+        assert "ev-legit-1" not in analysis.entities[0].evidence_ids
+
+    @pytest.mark.asyncio
+    async def test_concurrent_analysis_rejected(self):
+        """Verifies that duplicate concurrent analysis requests on the same investigation are rejected with 409."""
+        session = AsyncMock()
+        mock_client = AsyncMock()
+        service = AIAnalysisService(session, ollama_client=mock_client)
+
+        AIAnalysisService._active_investigations.add("inv-busy")
+        try:
+            with pytest.raises(AIEngineError) as exc_info:
+                await service.analyze_investigation("inv-busy")
+            assert exc_info.value.status_code == 409
+            assert exc_info.value.category == "concurrent_request"
+        finally:
+            AIAnalysisService._active_investigations.discard("inv-busy")
+
+    @pytest.mark.asyncio
+    async def test_simulated_evidence_excluded_from_ai_analysis(self):
+        """Verifies that simulated/mock evidence records are never passed to the AI model."""
+        session = AsyncMock()
+        mock_client = AsyncMock()
+        mock_client.model = "qwen3:4b"
+        service = AIAnalysisService(session, ollama_client=mock_client)
+
+        fake_inv = Investigation(
+            id="inv-sim",
+            title="Simulated Test",
+            target_clue="sim.org",
+            clue_type="domain",
+        )
+        service.inv_repo.get_by_id = AsyncMock(return_value=fake_inv)
+
+        sim_ev = EvidenceRecord(
+            id="ev-mock",
+            investigation_id="inv-sim",
+            title="Synthetic Demo Record",
+            extracted_passage="This is synthetic demo data that must not be analyzed.",
+            relevance_score=0.15,
+            why_included="Simulated synthetic demo record",
+            is_verified_source_statement=False,
+        )
+        assert sim_ev.is_simulated is True
+
+        service.evidence_repo.list_by_investigation = AsyncMock(return_value=[sim_ev])
+
+        analysis = await service.analyze_investigation("inv-sim")
+        assert analysis.analyzed_evidence_count == 0
+        assert "No verified evidence records" in analysis.executive_summary
+        mock_client.chat.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_persistence_failure_rollback(self):
+        """Verifies that persistence failure triggers rollback and raises structured database error."""
+        session = AsyncMock()
+        mock_client = AsyncMock()
+        service = AIAnalysisService(session, ollama_client=mock_client)
+
+        fake_inv = Investigation(
+            id="inv-fail-persist",
+            title="Fail Persist",
+            target_clue="fail.org",
+            clue_type="domain",
+        )
+        service.inv_repo.get_by_id = AsyncMock(return_value=fake_inv)
+
+        ev = EvidenceRecord(
+            id="ev-1",
+            investigation_id="inv-fail-persist",
+            title="Real Source",
+            extracted_passage="A valid long passage for analysis testing.",
+            relevance_score=0.9,
+            why_included="Valid test",
+            is_verified_source_statement=True,
+        )
+        service.evidence_repo.list_by_investigation = AsyncMock(return_value=[ev])
+
+        payload = {
+            "objective": "Test",
+            "executive_summary": "Summary",
+            "key_findings": [],
+            "evidence_summaries": [],
+            "entities": [],
+            "relationships": [],
+            "conflicts_and_limitations": [],
+            "missing_information": [],
+            "unverified_claims": [],
+        }
+        mock_client.chat = AsyncMock(return_value={"content": json.dumps(payload)})
+        mock_client.parse_json_safely = MagicMock(return_value=payload)
+        mock_client.model = "qwen3:4b"
+
+        # Simulate commit failure
+        session.commit = AsyncMock(side_effect=Exception("DB connection broken"))
+
+        with pytest.raises(AIEngineError) as exc_info:
+            await service.analyze_investigation("inv-fail-persist")
+        assert exc_info.value.status_code == 500
+        assert exc_info.value.category == "database_error"
+        session.rollback.assert_called()
+

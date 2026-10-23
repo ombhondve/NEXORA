@@ -31,7 +31,7 @@ router = APIRouter(tags=["AI Intelligence"])
 @router.get("/ai/health", response_model=AIHealthResponse)
 async def check_ai_health():
     """
-    Checks the status and availability of the local Ollama LLM provider and target model.
+    Checks the status and availability of the Ollama LLM provider and target model.
     Does not crash if Ollama is unreachable.
     """
     client = OllamaClient()
@@ -40,7 +40,7 @@ async def check_ai_health():
         status=status_code,
         provider="ollama",
         model=settings.OLLAMA_MODEL,
-        ollama_base_url=settings.OLLAMA_BASE_URL,
+        ollama_base_url=client.redacted_base_url,
         details=details,
     )
 
@@ -63,10 +63,20 @@ async def run_investigation_ai_analysis(
     try:
         return await service.analyze_investigation(id)
     except AIEngineError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": exc.category.upper(),
+                "message": exc.message,
+                "category": exc.category,
+            },
+        )
     except Exception as exc:
         logger.error("Error executing AI analysis for investigation %s: %s", id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An unexpected error occurred during AI analysis. Please verify provider connectivity.",
+        )
 
 
 @router.get(
@@ -106,10 +116,20 @@ async def ask_investigation_question(
     try:
         return await service.answer_question(id, payload.question)
     except AIEngineError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": exc.category.upper(),
+                "message": exc.message,
+                "category": exc.category,
+            },
+        )
     except Exception as exc:
         logger.error("Error answering AI question for investigation %s: %s", id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while answering the evidence question.",
+        )
 
 
 @router.post(
@@ -132,7 +152,17 @@ async def generate_ai_report_endpoint(
         res = await service.generate_ai_report(id)
         return InvestigationReportResponse(**res)
     except AIEngineError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={
+                "error": exc.category.upper(),
+                "message": exc.message,
+                "category": exc.category,
+            },
+        )
     except Exception as exc:
         logger.error("Error generating AI report for investigation %s: %s", id, exc)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate AI intelligence report.",
+        )

@@ -33,17 +33,18 @@ export const LeadGraphView: React.FC<LeadGraphViewProps> = ({
   const [filterType, setFilterType] = useState<string>('all');
   const [zoomLevel, setZoomLevel] = useState<number>(1);
 
-  // Filter nodes based on selected category
+  // Filter nodes based on selected category, ensuring root seed node is never hidden unexpectedly
   const filteredNodes = useMemo(() => {
     if (!graph || !graph.nodes) return [];
     if (filterType === 'all') return graph.nodes;
+    const isSeed = (n: GraphNode) => n.type === 'seed' || n.id.startsWith('seed:') || n.depth === 0;
     if (filterType === 'leads') {
-      return graph.nodes.filter((n) => n.type !== 'seed' && !n.id.startsWith('ent:'));
+      return graph.nodes.filter((n) => isSeed(n) || (!n.id.startsWith('ent:') && n.status !== 'extracted'));
     }
     if (filterType === 'entities') {
-      return graph.nodes.filter((n) => n.id.startsWith('ent:'));
+      return graph.nodes.filter((n) => isSeed(n) || n.id.startsWith('ent:') || n.status === 'extracted');
     }
-    return graph.nodes.filter((n) => n.type === filterType);
+    return graph.nodes.filter((n) => isSeed(n) || n.type === filterType);
   }, [graph, filterType]);
 
   const activeNodeIds = useMemo(() => {

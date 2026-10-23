@@ -5,6 +5,8 @@ evidence-grounded natural-language Q&A, and analytical report synthesis.
 Enforces strict citation grounding and prompt-injection defenses.
 """
 
+import asyncio
+import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set
 from sqlalchemy import select, desc
@@ -29,8 +31,16 @@ from recursive_osint.services.report_service import ReportService
 
 logger = get_logger("ai.analysis_service")
 
+# Allowed relationship kinds and entity categories for validation
+VALID_RELATIONSHIP_KINDS = {"direct", "inferred", "unverified"}
+VALID_ENTITY_TYPES = {"organization", "person", "domain", "product", "location", "identifier", "project"}
+
 
 class AIAnalysisService:
+    # In-process concurrency guard preventing concurrent duplicate analysis runs on the same investigation
+    _active_investigations: Set[str] = set()
+    _active_lock: asyncio.Lock = asyncio.Lock()
+
     def __init__(self, session: AsyncSession, ollama_client: Optional[OllamaClient] = None):
         self.session = session
         self.evidence_repo = EvidenceRepository(session)
@@ -69,11 +79,33 @@ class AIAnalysisService:
     async def analyze_investigation(self, investigation_id: str) -> AIInvestigationAnalysis:
         """
         Runs structured evidence summarization and contextual extraction over investigation evidence.
-        Validates citations and persists the analysis record.
+        Validates citations and persists the analysis record with strict transaction safety.
         """
+        # Concurrency protection: prevent concurrent analysis requests for the same investigation
+        async with self._active_lock:
+            if investigation_id in self._active_investigations:
+                raise AIEngineError(
+                    f"An AI analysis is already running for investigation {investigation_id}. Please wait for it to complete.",
+                    status_code=409,
+                    category="concurrent_request",
+                )
+            self._active_investigations.add(investigation_id)
+
+        start_time = time.perf_counter()
+        try:
+            return await self._execute_analysis(investigation_id, start_time)
+        finally:
+            async with self._active_lock:
+                self._active_investigations.discard(investigation_id)
+
+    async def _execute_analysis(self, investigation_id: str, start_time: float) -> AIInvestigationAnalysis:
         inv = await self.inv_repo.get_by_id(investigation_id)
         if not inv:
-            raise AIEngineError(f"Investigation {investigation_id} not found", status_code=404)
+            raise AIEngineError(f"Investigation {investigation_id} not found", status_code=404, category="not_found")
+
+        target_clue = inv.target_clue
+        clue_type = inv.clue_type
+        inv_title = inv.title
 
         all_evidence = await self.evidence_repo.list_by_investigation(investigation_id, limit=100)
         # Filter to valid, real evidence records (exclude simulated mock items and empty passages)
@@ -83,11 +115,11 @@ class AIAnalysisService:
         ]
 
         if not valid_evidence:
-            # Fallback when no evidence collected yet
-            empty_analysis = AIInvestigationAnalysis(
+            # Fallback when no verified evidence has been captured yet
+            return AIInvestigationAnalysis(
                 investigation_id=investigation_id,
                 model_name=self.client.model,
-                objective=f"Analyze OSINT findings for clue: {inv.target_clue}",
+                objective=f"Analyze OSINT findings for clue: {target_clue}",
                 executive_summary="No verified evidence records have been captured for this investigation yet. Run discovery queries first.",
                 key_findings=[],
                 evidence_summaries=[],
@@ -99,7 +131,6 @@ class AIAnalysisService:
                 analyzed_evidence_count=0,
                 created_at=datetime.now(timezone.utc),
             )
-            return empty_analysis
 
         # Limit to top N evidence records to respect context window and response speed
         selected_evidence = valid_evidence[: settings.AI_MAX_EVIDENCE_ITEMS]
@@ -126,8 +157,8 @@ class AIAnalysisService:
         )
 
         user_prompt = (
-            f"Investigation Target Clue: {inv.target_clue} (Type: {inv.clue_type})\n"
-            f"Investigation Title: {inv.title}\n\n"
+            f"Investigation Target Clue: {target_clue} (Type: {clue_type})\n"
+            f"Investigation Title: {inv_title}\n\n"
             f"Here are {len(selected_evidence)} verified evidence records collected for this investigation:\n"
             f"{context_str}\n\n"
             "Perform a structured intelligence analysis of this evidence. Return your response as a single valid JSON object with EXACTLY this structure:\n"
@@ -177,8 +208,33 @@ class AIAnalysisService:
             {"role": "user", "content": user_prompt},
         ]
 
-        logger.info("Calling Ollama for investigation %s analysis with %d evidence items...", investigation_id, len(selected_evidence))
-        res = await self.client.chat(messages, format="json", temperature=0.1)
+        logger.info(
+            "Dispatching AI analysis to %s for investigation %s (%d evidence items)...",
+            self.client.redacted_base_url,
+            investigation_id,
+            len(selected_evidence),
+        )
+
+        # Decouple database connection from slow external model call:
+        # Commit or rollback read state so no locks or idle-in-transaction states are held
+        try:
+            await self.session.rollback()
+        except Exception:
+            pass
+
+        try:
+            res = await self.client.chat(messages, format="json", temperature=0.1)
+        except AIEngineError as exc:
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.warning(
+                "AI analysis call failed for investigation %s after %.1fms (category: %s): %s",
+                investigation_id,
+                duration_ms,
+                exc.category,
+                exc.message,
+            )
+            raise
+
         raw_content = res.get("content", "")
         prompt_tokens = res.get("prompt_tokens", 0)
         completion_tokens = res.get("completion_tokens", 0)
@@ -196,7 +252,7 @@ class AIAnalysisService:
                         evidence_id=ev_id,
                         source_title=item.get("source_title") or source_record.title,
                         main_subject=item.get("main_subject", "Evidence Record"),
-                        key_facts=item.get("key_facts", []),
+                        key_facts=item.get("key_facts", []) if isinstance(item.get("key_facts"), list) else [],
                         relevance_to_investigation=item.get("relevance_to_investigation", "Relevant to investigation clue"),
                         limitations=item.get("limitations"),
                     )
@@ -207,21 +263,29 @@ class AIAnalysisService:
             val = str(item.get("entity_value", "")).strip()
             if not val or len(val) < 2:
                 continue
-            # Validate evidence IDs
+
+            # Strict evidence ID grounding: DO NOT invent or silently substitute the first evidence record!
             raw_ev_ids = item.get("evidence_ids", [])
-            valid_item_ids = [eid for eid in raw_ev_ids if eid in valid_ids]
-            if not valid_item_ids and selected_evidence:
-                valid_item_ids = [selected_evidence[0].id]
+            valid_item_ids = [eid for eid in raw_ev_ids if eid in valid_ids] if isinstance(raw_ev_ids, list) else []
+
+            raw_type = str(item.get("entity_type", "organization")).lower().strip()
+            entity_type = raw_type if raw_type in VALID_ENTITY_TYPES else "organization"
+
+            raw_conf = item.get("confidence", 0.70)
+            try:
+                conf = max(0.0, min(1.0, float(raw_conf)))
+            except (ValueError, TypeError):
+                conf = 0.70
 
             norm_val = item.get("normalized_value") or val.lower()
             sanitized_entities.append(
                 AIEntityCandidate(
-                    entity_type=item.get("entity_type", "organization"),
+                    entity_type=entity_type,
                     entity_value=val,
                     normalized_value=norm_val,
                     evidence_ids=valid_item_ids,
-                    context_snippet=item.get("context_snippet", ""),
-                    confidence=float(item.get("confidence", 0.70)),
+                    context_snippet=str(item.get("context_snippet", ""))[:500],
+                    confidence=conf,
                 )
             )
 
@@ -231,57 +295,88 @@ class AIAnalysisService:
             tgt = str(item.get("target_entity", "")).strip()
             if not src or not tgt or src == tgt:
                 continue
+
             raw_ev_ids = item.get("evidence_ids", [])
-            valid_rel_ids = [eid for eid in raw_ev_ids if eid in valid_ids]
+            valid_rel_ids = [eid for eid in raw_ev_ids if eid in valid_ids] if isinstance(raw_ev_ids, list) else []
+
+            raw_kind = str(item.get("relationship_kind", "inferred")).lower().strip()
+            rel_kind = raw_kind if raw_kind in VALID_RELATIONSHIP_KINDS else "inferred"
+
+            raw_conf = item.get("confidence", 0.65)
+            try:
+                conf = max(0.0, min(1.0, float(raw_conf)))
+            except (ValueError, TypeError):
+                conf = 0.65
+
             sanitized_relationships.append(
                 AIRelationshipCandidate(
                     source_entity=src,
                     target_entity=tgt,
-                    relationship_type=item.get("relationship_type", "associated_with"),
-                    relationship_kind=item.get("relationship_kind", "inferred"),
+                    relationship_type=str(item.get("relationship_type", "associated_with")).strip(),
+                    relationship_kind=rel_kind,
                     evidence_ids=valid_rel_ids,
-                    explanation=item.get("explanation", ""),
-                    confidence=float(item.get("confidence", 0.65)),
+                    explanation=str(item.get("explanation", ""))[:1000],
+                    confidence=conf,
                 )
             )
+
+        key_findings = [str(f) for f in data.get("key_findings", [])] if isinstance(data.get("key_findings"), list) else []
 
         analysis = AIInvestigationAnalysis(
             investigation_id=investigation_id,
             model_name=self.client.model,
-            objective=data.get("objective", f"Analyze OSINT findings for: {inv.target_clue}"),
+            objective=data.get("objective", f"Analyze OSINT findings for: {target_clue}"),
             executive_summary=data.get("executive_summary", "Analysis completed."),
-            key_findings=data.get("key_findings", []),
+            key_findings=key_findings,
             evidence_summaries=sanitized_evidence_summaries,
             entities=sanitized_entities,
             relationships=sanitized_relationships,
-            conflicts_and_limitations=data.get("conflicts_and_limitations", []),
-            missing_information=data.get("missing_information", []),
-            unverified_claims=data.get("unverified_claims", []),
+            conflicts_and_limitations=data.get("conflicts_and_limitations", []) if isinstance(data.get("conflicts_and_limitations"), list) else [],
+            missing_information=data.get("missing_information", []) if isinstance(data.get("missing_information"), list) else [],
+            unverified_claims=data.get("unverified_claims", []) if isinstance(data.get("unverified_claims"), list) else [],
             analyzed_evidence_count=len(selected_evidence),
             created_at=datetime.now(timezone.utc),
         )
 
-        # Persist record in database
-        db_record = InvestigationAIAnalysis(
-            investigation_id=investigation_id,
-            model_name=self.client.model,
-            objective=analysis.objective,
-            executive_summary=analysis.executive_summary,
-            key_findings_json=analysis.key_findings,
-            evidence_summaries_json=[item.model_dump() for item in analysis.evidence_summaries],
-            entities_json=[item.model_dump() for item in analysis.entities],
-            relationships_json=[item.model_dump() for item in analysis.relationships],
-            conflicts_and_limitations_json=analysis.conflicts_and_limitations,
-            missing_information_json=analysis.missing_information,
-            unverified_claims_json=analysis.unverified_claims,
-            analyzed_evidence_count=analysis.analyzed_evidence_count,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            status="completed",
-        )
-        self.session.add(db_record)
-        await self.session.commit()
-        logger.info("Successfully persisted AI analysis for investigation %s", investigation_id)
+        # Persist record in database with explicit rollback handling
+        try:
+            db_record = InvestigationAIAnalysis(
+                investigation_id=investigation_id,
+                model_name=self.client.model,
+                objective=analysis.objective,
+                executive_summary=analysis.executive_summary,
+                key_findings_json=analysis.key_findings,
+                evidence_summaries_json=[item.model_dump() for item in analysis.evidence_summaries],
+                entities_json=[item.model_dump() for item in analysis.entities],
+                relationships_json=[item.model_dump() for item in analysis.relationships],
+                conflicts_and_limitations_json=analysis.conflicts_and_limitations,
+                missing_information_json=analysis.missing_information,
+                unverified_claims_json=analysis.unverified_claims,
+                analyzed_evidence_count=analysis.analyzed_evidence_count,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                status="completed",
+            )
+            self.session.add(db_record)
+            await self.session.commit()
+            duration_ms = (time.perf_counter() - start_time) * 1000
+            logger.info(
+                "Successfully persisted AI analysis for investigation %s in %.1fms (tokens: %d/%d, entities: %d, relationships: %d)",
+                investigation_id,
+                duration_ms,
+                prompt_tokens,
+                completion_tokens,
+                len(sanitized_entities),
+                len(sanitized_relationships),
+            )
+        except Exception as exc:
+            await self.session.rollback()
+            logger.error("Failed to commit AI analysis record for investigation %s: %s", investigation_id, exc)
+            raise AIEngineError(
+                "Database error while saving AI analysis.",
+                status_code=500,
+                category="database_error",
+            )
 
         return analysis
 

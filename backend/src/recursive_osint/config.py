@@ -354,7 +354,12 @@ class Settings(BaseModel):
     ENABLE_WIKIPEDIA_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_WIKIPEDIA_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_INTERNET_ARCHIVE_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_INTERNET_ARCHIVE_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_CROSSREF_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_CROSSREF_CONNECTOR", "true").lower() in ("true", "1"))
-    ENABLE_MOCK_DEMO_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_MOCK_DEMO_CONNECTOR", "false").lower() in ("true", "1"))
+    ENABLE_MOCK_DEMO_CONNECTOR: bool = Field(
+        default_factory=lambda: os.getenv(
+            "ENABLE_MOCK_DEMO_CONNECTOR",
+            "false" if os.getenv("ENVIRONMENT", "development").strip().lower() == "production" else "true",
+        ).lower() in ("true", "1")
+    )
     ENABLE_SEARXNG_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_SEARXNG_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_OPENALEX_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_OPENALEX_CONNECTOR", "true").lower() in ("true", "1"))
     ENABLE_WIKIDATA_CONNECTOR: bool = Field(default_factory=lambda: os.getenv("ENABLE_WIKIDATA_CONNECTOR", "true").lower() in ("true", "1"))
@@ -452,6 +457,12 @@ class Settings(BaseModel):
 
             if self.DEBUG:
                 raise ValueError("FATAL [Production Security]: DEBUG mode must be False in production.")
+
+        if self.OLLAMA_BASE_URL:
+            if not (self.OLLAMA_BASE_URL.startswith("http://") or self.OLLAMA_BASE_URL.startswith("https://")):
+                raise ValueError(
+                    f"FATAL [Config]: OLLAMA_BASE_URL '{self.OLLAMA_BASE_URL}' must start with http:// or https://"
+                )
 
 
 settings = Settings()

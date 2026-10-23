@@ -103,11 +103,12 @@ class TestEntityExtractionAndRelevance(unittest.TestCase):
         rel, uncert, conf, why = EvidenceEvaluator.evaluate_passage(
             "Verbatim match for NEXORA Operations confirmed.",
             "NEXORA Operations",
-            "Mock Registry",
+            "wikipedia",
+            title="NEXORA Operations",
         )
         self.assertGreaterEqual(rel, 0.85)
         self.assertEqual(conf, "high")
-        self.assertIn("exact", why.lower())
+        self.assertIn("topical", why.lower())
 
 
 class TestMockConnector(unittest.TestCase):

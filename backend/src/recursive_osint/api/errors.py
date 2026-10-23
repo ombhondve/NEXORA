@@ -70,3 +70,20 @@ def register_exception_handlers(app):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"error": "APPLICATION_ERROR", "message": exc.message, "details": exc.details},
         )
+
+    # Register AIEngineError handler
+    from recursive_osint.ai.ollama_client import AIEngineError
+
+    @app.exception_handler(AIEngineError)
+    async def ai_engine_error_handler(request: Request, exc: AIEngineError):
+        logger.warning("AI Engine Error on %s: [%s] %s", request.url.path, exc.category, exc.message)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": exc.category.upper(),
+                "message": exc.message,
+                "category": exc.category,
+                "details": exc.details,
+            },
+        )
+
