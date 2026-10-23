@@ -93,18 +93,32 @@ export function AIIntelligenceTab({
     switch (providerHealth.status) {
       case 'ready':
         return `${providerHealth.provider === 'gemini' ? 'Gemini' : 'Groq'} active`;
-      case 'fallback_active':
+      case 'fallback_active': {
+        const gem = providerHealth.gemini_status;
+        if (gem === 'invalid_model') return 'Groq active — Gemini model error';
+        if (gem === 'auth_error') return 'Groq active — Gemini auth error';
+        if (gem === 'rate_limited') return 'Groq active — Gemini rate-limited';
         return 'Groq active — Gemini quota reached';
+      }
       case 'rate_limited':
         return 'Temporarily rate-limited';
       case 'quota_exhausted':
         return 'All AI quotas exhausted';
       case 'configuration_error':
+        if (providerHealth.gemini_status === 'invalid_model') {
+          return 'Gemini model unsupported';
+        }
+        if (providerHealth.gemini_status === 'auth_error') {
+          return 'Gemini auth invalid';
+        }
         return 'AI configuration required';
       case 'disabled':
         return 'AI disabled';
       default:
-        return 'All AI providers temporarily unavailable';
+        if (providerHealth.gemini_status === 'invalid_model') {
+          return 'Gemini model unsupported';
+        }
+        return 'AI providers temporarily unavailable';
     }
   };
 
@@ -120,7 +134,7 @@ export function AIIntelligenceTab({
             <div className="flex items-center space-x-2">
               <h2 className="text-sm font-bold text-white">AI Evidence Intelligence</h2>
               <span className="px-2 py-0.5 rounded text-[10px] bg-cyan-950/80 text-cyber-cyan border border-cyber-cyan/30">
-                {providerHealth?.model || 'gemini-1.5-flash'} @ {providerHealth?.provider || 'Gemini'}
+                {providerHealth?.model || 'gemini-2.5-flash'} @ {providerHealth?.provider || 'Gemini'}
               </span>
               {providerHealth && (
                 <span
@@ -189,6 +203,17 @@ export function AIIntelligenceTab({
                 <div>GEMINI_API_KEY=AIzaSy...</div>
                 <div>GROQ_API_KEY=gsk_...</div>
               </div>
+            </div>
+          )}
+
+          {(error.includes('not supported') || error.includes('not found') || error.includes('v1beta') || error.includes('invalid_model')) && (
+            <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2 text-[10px] text-slate-300">
+              <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                <span>Gemini Model Guidance:</span>
+              </div>
+              <p className="text-slate-300">
+                The configured Gemini model is not supported on the active API tier. Set <code className="text-cyber-cyan font-bold">GEMINI_MODEL=gemini-2.5-flash</code> in your environment variables.
+              </p>
             </div>
           )}
 

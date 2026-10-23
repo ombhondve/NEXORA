@@ -25,7 +25,7 @@ logger = get_logger("ai.provider_manager")
 class ProviderRuntimeState:
     """Tracks runtime operational state and quota health for a single AI provider."""
     name: str
-    status: str = "ready"  # ready, rate_limited, quota_exhausted, auth_error, unavailable, disabled, unconfigured
+    status: str = "ready"  # ready, rate_limited, quota_exhausted, auth_error, invalid_model, unavailable, disabled, unconfigured
     cooldown_until: float = 0.0
     last_success_time: Optional[float] = None
     last_failure_time: Optional[float] = None
@@ -77,8 +77,10 @@ class ProviderRuntimeState:
             self.status = "rate_limited"
         elif category == "auth_error":
             self.status = "auth_error"
-            # Auth error should not be immediately retried
             self.cooldown_until = time.time() + 3600.0
+        elif category == "invalid_model":
+            self.status = "invalid_model"
+            self.cooldown_until = time.time() + 1800.0
         else:
             self.status = "unavailable"
 
@@ -87,7 +89,7 @@ class AIProviderManager:
     """
     Centralized AI Provider Manager.
     Directs all model inferences through Google Gemini as primary, automatically failing over to Groq
-    upon rate limits or quota exhaustion, and seamlessly restoring Gemini when its cooldown expires.
+    upon rate limits, quota exhaustion, or model/temporary outages, and seamlessly restoring Gemini when its cooldown expires.
     """
 
     def __init__(
@@ -97,7 +99,6 @@ class AIProviderManager:
         ai_enabled: Optional[bool] = None,
     ):
         self.ai_enabled = settings.AI_ENABLED if ai_enabled is None else ai_enabled
-
         self.gemini = gemini_provider or GeminiProvider()
         self.groq = groq_provider or GroqProvider()
 
@@ -121,9 +122,17 @@ class AIProviderManager:
     @property
     def active_provider_name(self) -> str:
         """Returns the name of the provider that would be chosen for the next request."""
-        if not self.state["gemini"].is_in_cooldown and self.gemini.is_configured:
+        if (
+            not self.state["gemini"].is_in_cooldown
+            and self.gemini.is_configured
+            and self.state["gemini"].status not in ("auth_error", "invalid_model")
+        ):
             return "gemini"
-        elif self.groq.is_configured and not self.state["groq"].is_in_cooldown:
+        elif (
+            self.groq.is_configured
+            and not self.state["groq"].is_in_cooldown
+            and self.state["groq"].status not in ("auth_error", "invalid_model")
+        ):
             return "groq"
         return "gemini"
 
@@ -163,44 +172,49 @@ class AIProviderManager:
             if self.state["gemini"].is_in_cooldown:
                 gemini_available = False
             else:
-                gemini_available = gemini_configured and self.state["gemini"].status != "auth_error"
+                gemini_available = (
+                    gemini_configured
+                    and self.state["gemini"].status not in ("auth_error", "invalid_model")
+                )
 
             if self.state["groq"].is_in_cooldown:
                 groq_available = False
             else:
-                groq_available = groq_configured and self.state["groq"].status != "auth_error"
+                groq_available = (
+                    groq_configured
+                    and self.state["groq"].status not in ("auth_error", "invalid_model")
+                )
 
         # Routing decision:
         # Priority 1: Gemini (if available)
-        # Priority 2: Groq (if Gemini is in cooldown/unconfigured and Groq is available)
-        # Priority 3: Check if Gemini can be re-tested if both are cooling down
+        # Priority 2: Groq (if Gemini is in cooldown/unconfigured/model_error and Groq is available)
+        # Priority 3: Fallback check
         providers_to_try: List[Tuple[str, BaseAIProvider]] = []
 
         if gemini_available:
             providers_to_try.append(("gemini", self.gemini))
-            if groq_configured and self.state["groq"].status != "auth_error":
+            if groq_configured and self.state["groq"].status not in ("auth_error", "invalid_model"):
                 providers_to_try.append(("groq", self.groq))
         elif groq_available:
             providers_to_try.append(("groq", self.groq))
-            # If Groq fails, and Gemini's cooldown was close, Gemini might be re-evaluated
-            if gemini_configured and self.state["gemini"].status != "auth_error":
+            if gemini_configured and self.state["gemini"].status not in ("auth_error", "invalid_model"):
                 providers_to_try.append(("gemini", self.gemini))
         else:
-            # Both providers are currently in cooldown or rate limited
-            # Try whichever cooldown is smallest or return actionable error
-            if gemini_configured and self.state["gemini"].status != "auth_error":
+            # Both providers are currently in cooldown or error state
+            if gemini_configured and self.state["gemini"].status not in ("auth_error", "invalid_model"):
                 providers_to_try.append(("gemini", self.gemini))
-            if groq_configured and self.state["groq"].status != "auth_error":
+            if groq_configured and self.state["groq"].status not in ("auth_error", "invalid_model"):
                 providers_to_try.append(("groq", self.groq))
 
         if not providers_to_try:
+            # Check if one or both had invalid_model or auth_error
+            gem_err = self.state["gemini"].last_error_message or self.state["gemini"].status
+            groq_err = self.state["groq"].last_error_message or self.state["groq"].status
             raise AIEngineError(
-                "All configured AI providers have authentication errors or are misconfigured.",
+                f"All configured AI providers are unavailable. Gemini: {gem_err}; Groq: {groq_err}.",
                 status_code=503,
                 category="configuration_error",
             )
-
-        last_error: Optional[AIEngineError] = None
 
         for provider_name, provider in providers_to_try:
             # Bounded execution: exactly 1 attempt per provider (no infinite loops)
@@ -217,7 +231,7 @@ class AIProviderManager:
                     logger.info(
                         "AI request succeeded with %s (model: %s, latency: %.1fms, tokens: %d+%d)",
                         provider_name,
-                        provider.model,
+                        res.get("model", provider.model),
                         res.get("latency_ms", 0.0),
                         res.get("prompt_tokens", 0),
                         res.get("completion_tokens", 0),
@@ -226,7 +240,6 @@ class AIProviderManager:
                 return res
 
             except AIEngineError as exc:
-                last_error = exc
                 category = exc.category
                 logger.warning(
                     "AI Provider '%s' encountered %s: %s",
@@ -250,12 +263,15 @@ class AIProviderManager:
                         retry_after=exc.retry_after,
                     )
 
-                # If this was an auth error or non-recoverable request error, do not retry same provider
-                if category in ("quota_exhausted", "rate_limited", "service_unavailable", "timeout"):
-                    # Continue to fallback provider
+                # Fallback determination:
+                if category in ("quota_exhausted", "rate_limited"):
+                    logger.info("Failing over from %s to alternative provider due to quota/rate limit.", provider_name)
                     continue
-                elif category == "auth_error":
-                    # Provider has invalid key; try next provider if available
+                elif category in ("service_unavailable", "timeout"):
+                    logger.info("Failing over from %s to alternative provider due to temporary outage.", provider_name)
+                    continue
+                elif category in ("invalid_model", "auth_error"):
+                    logger.warning("Failing over from %s to alternative provider due to %s.", provider_name, category)
                     continue
                 else:
                     # Invalid request or bad prompt: do not retry against alternative provider blindly
@@ -263,14 +279,26 @@ class AIProviderManager:
 
         # If loop finishes without returning, all tried providers failed
         logger.error("All available AI providers failed to process the request.")
+        gem_st = self.state["gemini"].status
+        groq_st = self.state["groq"].status
+        gem_msg = self.state["gemini"].last_error_message or "unavailable"
+        groq_msg = self.state["groq"].last_error_message or "unavailable"
+
         raise AIEngineError(
             (
-                "All AI providers are temporarily unavailable or have exhausted their usage limits. "
-                f"Gemini status: {self.state['gemini'].status}; Groq status: {self.state['groq'].status}. "
-                "Please retry after cooldown."
+                "All AI providers are temporarily unavailable or unable to process the request. "
+                f"Gemini: [{gem_st}] {gem_msg}; "
+                f"Groq: [{groq_st}] {groq_msg}. "
+                "Please verify provider configuration or retry after cooldown."
             ),
             status_code=503,
-            category="quota_exhausted" if any(s.status == "quota_exhausted" for s in self.state.values()) else "all_providers_unavailable",
+            category=(
+                "quota_exhausted"
+                if any(s.status == "quota_exhausted" for s in self.state.values())
+                else "configuration_error"
+                if any(s.status in ("auth_error", "invalid_model") for s in self.state.values())
+                else "all_providers_unavailable"
+            ),
         )
 
     async def check_health(self) -> Tuple[str, str]:
@@ -297,22 +325,24 @@ class AIProviderManager:
         if gemini_configured:
             if self.state["gemini"].is_in_cooldown:
                 gemini_status = self.state["gemini"].status
-                gemini_details = f"Gemini in cooldown until {int(self.state['gemini'].cooldown_until - time.time())}s: {self.state['gemini'].last_error_message}"
+                gemini_details = f"Gemini in cooldown ({self.state['gemini'].status}): {self.state['gemini'].last_error_message}"
             else:
                 gemini_status, gemini_details = await self.gemini.check_health()
                 if gemini_status != "ready":
                     self.state["gemini"].status = gemini_status
+                    self.state["gemini"].last_error_message = gemini_details
 
         # Check Groq status
         groq_status, groq_details = ("unconfigured", "GROQ_API_KEY not set")
         if groq_configured:
             if self.state["groq"].is_in_cooldown:
                 groq_status = self.state["groq"].status
-                groq_details = f"Groq in cooldown until {int(self.state['groq'].cooldown_until - time.time())}s: {self.state['groq'].last_error_message}"
+                groq_details = f"Groq in cooldown ({self.state['groq'].status}): {self.state['groq'].last_error_message}"
             else:
                 groq_status, groq_details = await self.groq.check_health()
                 if groq_status != "ready":
                     self.state["groq"].status = groq_status
+                    self.state["groq"].last_error_message = groq_details
 
         # Aggregate overall status
         if gemini_status == "ready":
@@ -327,8 +357,10 @@ class AIProviderManager:
             return "quota_exhausted", "Both Gemini and Groq usage quotas are temporarily exhausted."
         elif gemini_status == "rate_limited" or groq_status == "rate_limited":
             return "rate_limited", f"AI providers are temporarily rate-limited. Gemini: {gemini_status}, Groq: {groq_status}."
+        elif gemini_status in ("invalid_model", "auth_error") and not groq_configured:
+            return "configuration_error", f"Gemini configuration error: {gemini_details}. Groq fallback is not configured."
         else:
-            return "unavailable", f"AI providers unavailable. Gemini: {gemini_details}; Groq: {groq_details}."
+            return "unavailable", f"AI providers unavailable. Gemini: [{gemini_status}] {gemini_details}; Groq: [{groq_status}] {groq_details}."
 
     @staticmethod
     def parse_json_safely(raw_content: str) -> Dict[str, Any]:

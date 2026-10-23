@@ -206,6 +206,23 @@ class TestAIProviderManager:
         assert manager.state["gemini"].status == "auth_error"
 
     @pytest.mark.asyncio
+    async def test_scenario_8b_gemini_invalid_model_fails_over_to_groq(self):
+        """8b. Gemini invalid/unsupported model: recorded as invalid_model, not quota_exhausted, Groq handles request."""
+        gemini = FakeProvider(
+            "gemini",
+            "gemini-1.5-flash",
+            fail_with_category="invalid_model",
+            fail_status_code=404,
+        )
+        groq = FakeProvider("groq", "llama-3.3-70b-versatile")
+        manager = AIProviderManager(gemini_provider=gemini, groq_provider=groq, ai_enabled=True)
+
+        res = await manager.chat([{"role": "user", "content": "analyze model"}])
+        assert res["provider"] == "groq"
+        assert manager.state["gemini"].status == "invalid_model"
+        assert manager.state["gemini"].status != "quota_exhausted"
+
+    @pytest.mark.asyncio
     async def test_scenario_9_invalid_groq_key_gemini_handles(self):
         """9. Invalid Groq key: configuration error is recorded and Gemini is used if available."""
         gemini = FakeProvider("gemini", "gemini-1.5-flash")
@@ -263,6 +280,96 @@ class TestAIProviderManager:
             AIProviderManager.parse_json_safely("not json at all { unclosed bracket")
         assert exc_info.value.status_code == 502
         assert exc_info.value.category == "invalid_model_response"
+
+
+class TestGeminiModelVerification:
+    """Verifies that Gemini model names are verified against Google's API and resolved automatically."""
+
+    @pytest.mark.asyncio
+    async def test_gemini_verifies_and_resolves_working_model(self):
+        from recursive_osint.ai.providers.gemini_provider import GeminiProvider
+
+        provider = GeminiProvider(api_key="AIzaSyTestKeyValid123", model="gemini-1.5-flash")
+
+        # Mock models.list() returning gemini-2.5-flash as the active model
+        mock_m1 = MagicMock()
+        mock_m1.name = "models/gemini-2.5-flash"
+        mock_m1.supported_actions = ["generateContent"]
+
+        class AsyncPagerMock:
+            def __aiter__(self):
+                return self
+            def __init__(self):
+                self._items = [mock_m1]
+                self._idx = 0
+            async def __anext__(self):
+                if self._idx < len(self._items):
+                    item = self._items[self._idx]
+                    self._idx += 1
+                    return item
+                raise StopAsyncIteration
+
+        mock_client = MagicMock()
+        mock_client.aio.models.list = AsyncMock(return_value=AsyncPagerMock())
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "gemini-2.5-flash"
+
+    @pytest.mark.asyncio
+    async def test_gemini_preserves_custom_model_if_available(self):
+        from recursive_osint.ai.providers.gemini_provider import GeminiProvider
+
+        provider = GeminiProvider(api_key="AIzaSyTestKeyValid123", model="gemini-2.5-pro")
+
+        mock_m1 = MagicMock()
+        mock_m1.name = "models/gemini-2.5-pro"
+        mock_m1.supported_actions = ["generateContent"]
+
+        class AsyncPagerMock:
+            def __aiter__(self):
+                return self
+            def __init__(self):
+                self._items = [mock_m1]
+                self._idx = 0
+            async def __anext__(self):
+                if self._idx < len(self._items):
+                    item = self._items[self._idx]
+                    self._idx += 1
+                    return item
+                raise StopAsyncIteration
+
+        mock_client = MagicMock()
+        mock_client.aio.models.list = AsyncMock(return_value=AsyncPagerMock())
+        provider._client = mock_client
+
+        resolved = await provider.resolve_working_model()
+        assert resolved == "gemini-2.5-pro"
+
+    @pytest.mark.asyncio
+    async def test_gemini_404_maps_to_invalid_model_error(self):
+        from recursive_osint.ai.providers.gemini_provider import GeminiProvider
+        from google.genai.errors import APIError
+
+        provider = GeminiProvider(api_key="AIzaSyTestKeyValid123", model="gemini-1.5-flash")
+        provider._model_verified = True
+        provider._resolved_model = "gemini-1.5-flash"
+
+        exc_404 = APIError(
+            404,
+            {"error": {"message": "models/gemini-1.5-flash is not found for API version v1beta, or is not supported for generateContent"}},
+        )
+
+        mock_client = MagicMock()
+        mock_client.aio.models.generate_content = AsyncMock(side_effect=exc_404)
+        provider._client = mock_client
+
+        with pytest.raises(AIEngineError) as exc_info:
+            await provider.generate([{"role": "user", "content": "test"}])
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.category == "invalid_model"
+        assert "not supported or not found" in exc_info.value.message
 
 
 # =====================================================================

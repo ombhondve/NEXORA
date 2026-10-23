@@ -385,7 +385,7 @@ class Settings(BaseModel):
 
     # Primary Provider: Google Gemini
     GEMINI_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("GEMINI_API_KEY", None))
-    GEMINI_MODEL: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-1.5-flash"))
+    GEMINI_MODEL: str = Field(default_factory=lambda: os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
     GEMINI_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_TIMEOUT_SECONDS", "60.0")))
     GEMINI_RATE_LIMIT_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_RATE_LIMIT_COOLDOWN_SECONDS", "60.0")))
     GEMINI_QUOTA_COOLDOWN_SECONDS: float = Field(default_factory=lambda: float(os.getenv("GEMINI_QUOTA_COOLDOWN_SECONDS", "300.0")))
