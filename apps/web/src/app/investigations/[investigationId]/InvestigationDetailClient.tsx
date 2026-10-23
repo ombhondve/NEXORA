@@ -163,13 +163,17 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
     }
   };
 
+  const [graphWarning, setGraphWarning] = useState<string | null>(null);
+
   const handleAIAnalysisComplete = useCallback(async (analysis: AIInvestigationAnalysis) => {
     setAiAnalysis(analysis);
+    setGraphWarning(null);
     try {
       const updatedGraph = await api.getLeadGraph(investigationId);
       setGraph(updatedGraph);
     } catch (err) {
       console.warn('Failed to refresh lead graph after AI analysis:', err);
+      setGraphWarning('AI intelligence analysis completed successfully. Lead graph refresh encountered a temporary delay; switch to the Lead Graph tab to view or reload.');
     }
   }, [investigationId]);
 
@@ -417,9 +421,12 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
           {/* Progress Bar & Counters */}
           <div className="space-y-2">
             <div className="flex justify-between text-xs font-mono text-slate-400">
-              <span className="flex items-center gap-1.5">
+              <span
+                className="flex items-center gap-1.5"
+                title="Explored Depth represents the depth of recursive leads actually searched. Depth 0 indicates the seed clue was searched; discovered child leads at subsequent depths remain queued when budget is reached."
+              >
                 <Layers className="w-3.5 h-3.5 text-cyber-cyan" />
-                Recursion Depth: {investigation.current_depth} / {investigation.max_depth}
+                Explored Depth: {investigation.current_depth} / {investigation.max_depth}
               </span>
               <span>Budget Utilized: {investigation.progress_percent}%</span>
             </div>
@@ -433,27 +440,40 @@ export default function InvestigationDetailClient({ params }: ComponentProps) {
 
           {/* Quick Metrics */}
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2 text-center font-mono">
-            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40" title="Unique canonical nodes in the relationship graph">
               <div className="text-lg font-bold text-cyber-cyan">{graph?.total_nodes || 0}</div>
               <div className="text-[10px] text-slate-400 uppercase">Graph Nodes</div>
             </div>
-            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40" title="Scored and verified evidence passages extracted from source documents">
               <div className="text-lg font-bold text-white">{evidence.length}</div>
               <div className="text-[10px] text-slate-400 uppercase">Evidence Records</div>
             </div>
-            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40" title="Extracted entity occurrences across all scanned sources">
               <div className="text-lg font-bold text-white">{entities.length}</div>
               <div className="text-[10px] text-slate-400 uppercase">Discovered Entities</div>
             </div>
-            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40" title="Unique web documents fetched and parsed by source connectors">
               <div className="text-lg font-bold text-white">{documents.length}</div>
               <div className="text-[10px] text-slate-400 uppercase">Scanned Sources</div>
             </div>
-            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40">
+            <div className="p-2.5 rounded-lg bg-cyber-card/30 border border-cyber-border/40" title="Recorded execution events and audit trail milestones">
               <div className="text-lg font-bold text-white">{events.length}</div>
               <div className="text-[10px] text-slate-400 uppercase">Audit Events</div>
             </div>
           </div>
+
+          {/* Graph refresh non-blocking warning banner */}
+          {graphWarning && (
+            <div className="p-3 bg-amber-950/40 border border-amber-800/60 rounded-lg text-xs font-mono text-amber-200 flex items-center justify-between">
+              <span>{graphWarning}</span>
+              <button
+                onClick={() => setGraphWarning(null)}
+                className="ml-3 px-2 py-0.5 bg-amber-900/60 hover:bg-amber-800 text-amber-200 rounded text-[10px]"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tab Selection */}

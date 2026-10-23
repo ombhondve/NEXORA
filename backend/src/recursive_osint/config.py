@@ -384,6 +384,7 @@ class Settings(BaseModel):
     OLLAMA_BASE_URL: str = Field(default_factory=lambda: os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/"))
     OLLAMA_MODEL: str = Field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "qwen3:4b"))
     OLLAMA_TIMEOUT_SECONDS: float = Field(default_factory=lambda: float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120.0")))
+    OLLAMA_API_KEY: Optional[str] = Field(default_factory=lambda: os.getenv("OLLAMA_API_KEY", None))
     AI_MAX_EVIDENCE_ITEMS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_EVIDENCE_ITEMS", "20")))
     AI_MAX_INPUT_TOKENS: int = Field(default_factory=lambda: int(os.getenv("AI_MAX_INPUT_TOKENS", "4096")))
 

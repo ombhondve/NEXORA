@@ -59,6 +59,16 @@ class InvestigationService:
         # If user_id is provided and the investigation has an owner, verify ownership
         if user_id and inv.user_id and inv.user_id != user_id:
             raise AccessDeniedError("Access to this investigation is restricted to its owner.")
+
+        # Ensure budget utilization consistency for records where progress_percent was clamped to 95%
+        if inv.stop_reason and "Query budget exhausted" in inv.stop_reason:
+            import re
+            m = re.search(r"\((\d+)/(\d+)\)", inv.stop_reason)
+            if m:
+                used, total = int(m.group(1)), int(m.group(2))
+                if total > 0 and used >= total and inv.progress_percent < 100:
+                    inv.progress_percent = 100
+
         return inv
 
     async def list_user_investigations(self, user_id: Optional[str] = None, skip: int = 0, limit: int = 50) -> List[Investigation]:

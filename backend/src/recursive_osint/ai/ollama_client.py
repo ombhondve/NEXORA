@@ -28,6 +28,13 @@ def redact_url(url: str) -> str:
         return url
 
 
+DEFAULT_AI_HEADERS = {
+    "User-Agent": "NEXORA-OSINT-Intelligence/1.0",
+    "ngrok-skip-browser-warning": "true",
+    "Accept": "application/json",
+}
+
+
 def is_loopback_host(hostname: Optional[str]) -> bool:
     """Returns True if the hostname resolves to a loopback address."""
     if not hostname:
@@ -61,12 +68,22 @@ class OllamaClient:
         model: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
         ai_enabled: Optional[bool] = None,
+        api_key: Optional[str] = None,
     ):
         raw_url = base_url or settings.OLLAMA_BASE_URL
         self.base_url = (raw_url or "").rstrip("/")
         self.model = model or settings.OLLAMA_MODEL
         self.timeout_seconds = timeout_seconds or settings.OLLAMA_TIMEOUT_SECONDS
         self.ai_enabled = settings.AI_ENABLED if ai_enabled is None else ai_enabled
+        self.api_key = api_key or getattr(settings, "OLLAMA_API_KEY", None)
+
+    @property
+    def _headers(self) -> Dict[str, str]:
+        """Constructs headers for AI provider requests, including tunnel bypass and auth."""
+        headers = dict(DEFAULT_AI_HEADERS)
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
     @property
     def redacted_base_url(self) -> str:
@@ -79,7 +96,7 @@ class OllamaClient:
         Returns (is_valid, error_diagnostic).
         """
         if not self.base_url:
-            return False, "Ollama base URL is empty. Please set OLLAMA_BASE_URL."
+            return False, "Ollama base URL is empty. Please configure OLLAMA_BASE_URL in your environment."
 
         try:
             parsed = urlparse(self.base_url)
@@ -98,11 +115,12 @@ class OllamaClient:
             return (
                 False,
                 (
-                    f"AI provider configuration error: The backend is deployed in a cloud/serverless "
-                    f"environment ({settings.ENVIRONMENT}) and cannot connect to '{self.redacted_base_url}'. "
-                    f"Localhost refers to the ephemeral serverless container, not your local machine. "
-                    f"Please configure OLLAMA_BASE_URL to a reachable external Ollama endpoint "
-                    f"in your Vercel project environment variables (e.g. https://your-ollama-host:11434)."
+                    f"AI provider configuration error: The backend is running in cloud/serverless "
+                    f"({settings.ENVIRONMENT}) and cannot connect to '{self.redacted_base_url}'. "
+                    f"Localhost refers to the isolated serverless container, not your computer. "
+                    f"To connect AI to this deployment, set OLLAMA_BASE_URL in your Vercel Project "
+                    f"Environment Variables to an externally reachable HTTPS Ollama URL "
+                    f"(e.g. https://your-host.ngrok-free.app or https://ollama.your-domain.com)."
                 ),
             )
 
@@ -124,10 +142,19 @@ class OllamaClient:
 
         url = f"{self.base_url}/api/tags"
         try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
+            async with httpx.AsyncClient(headers=self._headers, timeout=8.0) as client:
                 res = await client.get(url)
                 if res.status_code != 200:
                     return "error", f"Ollama returned HTTP status {res.status_code} on tags endpoint at {self.redacted_base_url}."
+
+                # Verify response is valid JSON, not an HTML error or tunnel interstitial page
+                content_type = res.headers.get("content-type", "") if hasattr(res, "headers") else ""
+                res_text = res.text if isinstance(getattr(res, "text", None), str) else ""
+                if "text/html" in content_type or (res_text and res_text.strip().startswith(("<html", "<!DOCTYPE"))):
+                    return (
+                        "error",
+                        f"Endpoint at {self.redacted_base_url} returned HTML instead of the Ollama JSON API. Verify the endpoint URL.",
+                    )
 
                 data = res.json()
                 models = [m.get("name", "") for m in data.get("models", [])]
@@ -208,7 +235,7 @@ class OllamaClient:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                async with httpx.AsyncClient(headers=self._headers, timeout=self.timeout_seconds) as client:
                     res = await client.post(url, json=payload)
                     if res.status_code == 404:
                         raise AIEngineError(
@@ -220,6 +247,15 @@ class OllamaClient:
                     if res.status_code != 200:
                         raise AIEngineError(
                             f"Ollama returned HTTP error {res.status_code}: {res.text[:200]}",
+                            status_code=502,
+                            category="invalid_model_response",
+                        )
+
+                    content_type = res.headers.get("content-type", "") if hasattr(res, "headers") else ""
+                    res_text = res.text if isinstance(getattr(res, "text", None), str) else ""
+                    if "text/html" in content_type or (res_text and res_text.strip().startswith(("<html", "<!DOCTYPE"))):
+                        raise AIEngineError(
+                            f"Endpoint at {self.redacted_base_url} returned an HTML page instead of Ollama JSON API. Verify the endpoint URL.",
                             status_code=502,
                             category="invalid_model_response",
                         )

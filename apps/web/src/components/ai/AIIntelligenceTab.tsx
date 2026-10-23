@@ -148,17 +148,36 @@ export function AIIntelligenceTab({
 
       {/* Error state */}
       {error && (
-        <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/30 text-rose-300 space-y-2">
-          <div className="flex items-center space-x-2 font-bold">
+        <div className="p-4 rounded-xl border border-rose-800/80 bg-rose-950/30 text-rose-300 space-y-3 font-mono">
+          <div className="flex items-center space-x-2 font-bold text-rose-200">
             <AlertTriangle className="w-4 h-4 text-rose-400" />
-            <span>AI Intelligence Notice</span>
+            <span>AI Provider Notice</span>
           </div>
           <p className="text-[11px] leading-relaxed">{error}</p>
-          <div className="pt-2 flex items-center space-x-3">
+
+          {error.includes('OLLAMA_BASE_URL') && (
+            <div className="p-3 bg-cyber-bg/80 border border-cyber-border/70 rounded-lg space-y-2 text-[10px] text-slate-300">
+              <div className="font-bold text-cyber-cyan flex items-center gap-1.5">
+                <span>Required Vercel Configuration Key:</span>
+                <code className="px-1.5 py-0.5 rounded bg-slate-900 border border-cyber-cyan/40 text-cyber-cyan font-bold">
+                  OLLAMA_BASE_URL
+                </code>
+              </div>
+              <p className="text-slate-400">
+                In cloud deployments (Vercel), serverless functions run in isolated AWS Lambda containers.
+                Set <code className="text-white">OLLAMA_BASE_URL</code> in your Vercel Project Settings &rarr; Environment Variables to your reachable HTTPS Ollama host (e.g. Cloudflare Tunnel, ngrok tunnel, or cloud GPU instance).
+              </p>
+              <div className="font-mono text-slate-400 bg-slate-950 p-2 rounded border border-cyber-border/50 text-[10px]">
+                OLLAMA_BASE_URL=https://your-reachable-ollama-host
+              </div>
+            </div>
+          )}
+
+          <div className="pt-1 flex items-center space-x-3">
             <button
               onClick={handleRunAnalysis}
               disabled={loading}
-              className="px-3 py-1 rounded bg-rose-900/60 border border-rose-700 text-white hover:bg-rose-800 transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 rounded bg-rose-900/60 border border-rose-700 text-white hover:bg-rose-800 transition-colors disabled:opacity-50 text-xs font-semibold"
             >
               Retry Analysis
             </button>
