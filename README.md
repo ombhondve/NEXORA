@@ -147,3 +147,4 @@ If you change `GROQ_API_KEY` or `GROQ_MODEL` in Vercel project settings, trigger
 ## ⚖️ Legal & Analytical Disclaimer
 
 This tool assists with preliminary document review. AI-generated findings may be incomplete or incorrect and must be verified against original documents. This software does not provide formal legal advice, does not establish guilt or fraud, does not replace professional legal judgment, and does not guarantee that a lawyer will win a case.
+

@@ -120,3 +120,4 @@ export interface CompleteAnalysisResult {
   analysis: RawAnalysisOutput;
   pages: ExtractedPage[];
 }
+

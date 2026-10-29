@@ -30,3 +30,4 @@ export function normalizeWhitespace(text: string): string {
     .replace(/\n\s*\n\s*\n+/g, '\n\n')
     .trim();
 }
+

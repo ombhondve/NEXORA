@@ -249,3 +249,4 @@ export default function DocumentUpload({ onStartAnalysis, isLoading }: DocumentU
     </div>
   );
 }
+

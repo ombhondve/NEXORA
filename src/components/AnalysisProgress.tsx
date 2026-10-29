@@ -93,3 +93,4 @@ export default function AnalysisProgress({ filename }: AnalysisProgressProps) {
     </div>
   );
 }
+

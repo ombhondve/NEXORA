@@ -43,3 +43,4 @@ export function validatePdfBuffer(buffer: Buffer | Uint8Array, filename?: string
 
   return { valid: true };
 }
+

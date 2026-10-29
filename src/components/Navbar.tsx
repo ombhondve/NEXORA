@@ -86,3 +86,4 @@ export default function Navbar({ onReset }: { onReset?: () => void }) {
     </header>
   );
 }
+

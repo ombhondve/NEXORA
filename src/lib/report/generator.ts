@@ -476,3 +476,4 @@ export async function generateLegalReportPdf(analysisResult: CompleteAnalysisRes
 
   return await doc.save();
 }
+

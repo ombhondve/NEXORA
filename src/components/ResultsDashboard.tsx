@@ -452,3 +452,4 @@ export default function ResultsDashboard({ result, onReset }: ResultsDashboardPr
     </div>
   );
 }
+
